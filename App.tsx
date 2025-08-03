@@ -20,9 +20,11 @@ import {
   ScrollView,
   Linking,
   BackHandler,
+  StatusBar,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import KeepAwake from 'react-native-keep-awake';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { AlarmModule } = NativeModules;
 
@@ -41,6 +43,15 @@ interface MathProblem {
 }
 
 function App() {
+  // Configure status bar for visibility
+  useEffect(() => {
+    StatusBar.setBarStyle('dark-content');
+    if (Platform.OS === 'android') {
+      StatusBar.setBackgroundColor('white');
+      StatusBar.setTranslucent(false);
+    }
+  }, []);
+
   const [alarms, setAlarms] = useState<Alarm[]>([]);
   const [selectedTime, setSelectedTime] = useState(new Date());
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -52,17 +63,47 @@ function App() {
   const [showPermissionPrompt, setShowPermissionPrompt] = useState(false);
   const [currentScreen, setCurrentScreen] = useState<'home' | 'setAlarm'>('home');
   const [selectedRepeatDays, setSelectedRepeatDays] = useState<number[]>([1, 2, 3, 4, 5]); // Monday to Friday
+  const [currentAlarmId, setCurrentAlarmId] = useState<number | null>(null);
 
-  // Check if app was launched from alarm
+  // Load saved alarms when app starts
+  useEffect(() => {
+    const loadSavedAlarms = async () => {
+      const savedAlarms = await loadAlarmsFromStorage();
+      if (savedAlarms.length > 0) {
+        setAlarms(savedAlarms);
+        // Set nextAlarmId to be higher than the highest existing alarm ID
+        const maxId = Math.max(...savedAlarms.map(alarm => alarm.id));
+        setNextAlarmId(maxId + 1);
+        console.log('Loaded', savedAlarms.length, 'alarms from storage');
+      }
+    };
+    
+    loadSavedAlarms();
+  }, []);
+
+  // Check if app was launched from alarm (only on initial load)
   useEffect(() => {
     const checkAlarmLaunch = async () => {
       try {
         const isAlarmLaunch = await AlarmModule.checkIfAlarmLaunch();
-        if (isAlarmLaunch) {
+        if (isAlarmLaunch && !isAlarmActive) {
           console.log('App launched from alarm!');
           setIsAlarmLaunch(true);
           setIsAlarmActive(true);
           setMathProblem(generateMathProblem());
+          
+          // Find the alarm that was triggered (the one that's due now)
+          const now = new Date();
+          const triggeredAlarm = alarms.find(alarm => {
+            const alarmTime = new Date(alarm.time);
+            const timeDiff = Math.abs(alarmTime.getTime() - now.getTime());
+            return timeDiff < 60000; // Within 1 minute
+          });
+          
+          if (triggeredAlarm) {
+            setCurrentAlarmId(triggeredAlarm.id);
+            console.log('Current alarm ID set to:', triggeredAlarm.id);
+          }
         }
       } catch (error) {
         console.log('Error checking alarm launch:', error);
@@ -70,34 +111,45 @@ function App() {
     };
     
     checkAlarmLaunch();
-  }, []);
+  }, []); // Only run on initial load, not when alarms or isAlarmActive changes
 
   // Listen for app state changes to detect when app comes to foreground
   useEffect(() => {
-    const handleAppStateChange = (nextAppState: string) => {
-      if (nextAppState === 'active') {
-        // Check if we're coming back from an alarm
-        checkAlarmLaunch();
+    const handleAppStateChange = async (nextAppState: string) => {
+      if (nextAppState === 'active' && !isAlarmActive) {
+        // Only check for alarm launch if we're not already in an alarm state
+        try {
+          const isAlarmLaunch = await AlarmModule.checkIfAlarmLaunch();
+          if (isAlarmLaunch && !isAlarmActive) {
+            console.log('App activated from alarm!');
+            setIsAlarmLaunch(true);
+            setIsAlarmActive(true);
+            setMathProblem(generateMathProblem());
+            
+            // Find the alarm that was triggered
+            const now = new Date();
+            const triggeredAlarm = alarms.find(alarm => {
+              const alarmTime = new Date(alarm.time);
+              const timeDiff = Math.abs(alarmTime.getTime() - now.getTime());
+              return timeDiff < 60000; // Within 1 minute
+            });
+            
+            if (triggeredAlarm) {
+              setCurrentAlarmId(triggeredAlarm.id);
+              console.log('Current alarm ID set to:', triggeredAlarm.id);
+            }
+          }
+        } catch (error) {
+          console.log('Error checking alarm launch:', error);
+        }
       }
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
-  }, []);
+  }, [isAlarmActive, alarms]);
 
-  const checkAlarmLaunch = async () => {
-    try {
-      const isAlarmLaunch = await AlarmModule.checkIfAlarmLaunch();
-              if (isAlarmLaunch) {
-          console.log('App activated from alarm!');
-          setIsAlarmLaunch(true);
-          setIsAlarmActive(true);
-          setMathProblem(generateMathProblem());
-        }
-    } catch (error) {
-      console.log('Error checking alarm launch:', error);
-    }
-  };
+
 
   useEffect(() => {
     if (isAlarmActive) {
@@ -146,8 +198,87 @@ function App() {
     return { num1, num2, operator, answer };
   };
 
+  // Helper functions for persistent storage
+  const saveAlarmsToStorage = async (alarmsToSave: Alarm[]) => {
+    try {
+      const alarmsData = alarmsToSave.map(alarm => ({
+        ...alarm,
+        time: alarm.time.toISOString(), // Convert Date to string for storage
+      }));
+      await AsyncStorage.setItem('nooze_alarms', JSON.stringify(alarmsData));
+      console.log('Alarms saved to storage:', alarmsToSave.length);
+    } catch (error) {
+      console.error('Error saving alarms to storage:', error);
+    }
+  };
+
+  const loadAlarmsFromStorage = async (): Promise<Alarm[]> => {
+    try {
+      const alarmsData = await AsyncStorage.getItem('nooze_alarms');
+      if (alarmsData) {
+        const parsedAlarms = JSON.parse(alarmsData).map((alarm: any) => ({
+          ...alarm,
+          time: new Date(alarm.time), // Convert string back to Date
+        }));
+        console.log('Alarms loaded from storage:', parsedAlarms.length);
+        return parsedAlarms;
+      }
+      return [];
+    } catch (error) {
+      console.error('Error loading alarms from storage:', error);
+      return [];
+    }
+  };
+
+  // Helper function to calculate next valid alarm time based on repeat days
+  const calculateNextAlarmTime = (selectedTime: Date, repeatDays: number[]): Date => {
+    const now = new Date();
+    const alarmTime = new Date(selectedTime);
+    
+    // Get current day of week (0 = Sunday, 1 = Monday, etc.)
+    const currentDay = now.getDay();
+    
+    // If no repeat days selected, just set for next occurrence
+    if (repeatDays.length === 0) {
+      if (alarmTime <= now) {
+        alarmTime.setDate(alarmTime.getDate() + 1);
+      }
+      return alarmTime;
+    }
+    
+    // Check if today is a selected repeat day
+    const isTodaySelected = repeatDays.includes(currentDay);
+    
+    if (isTodaySelected) {
+      // If today is selected and time hasn't passed, set for today
+      if (alarmTime > now) {
+        return alarmTime;
+      }
+    }
+    
+    // Find the next selected day
+    let daysToAdd = 1;
+    let nextDay = (currentDay + daysToAdd) % 7;
+    
+    // Look for the next selected day within the next 7 days
+    while (daysToAdd <= 7) {
+      if (repeatDays.includes(nextDay)) {
+        break;
+      }
+      daysToAdd++;
+      nextDay = (currentDay + daysToAdd) % 7;
+    }
+    
+    // Set the alarm for the next selected day
+    const nextAlarmTime = new Date(selectedTime);
+    nextAlarmTime.setDate(nextAlarmTime.getDate() + daysToAdd);
+    
+    return nextAlarmTime;
+  };
+
   const scheduleAlarm = async (time: Date) => {
     console.log('scheduleAlarm called with time:', time.toLocaleString());
+    console.log('Selected repeat days:', selectedRepeatDays);
     
     // Check if we have the required permission
     const hasPermission = await AlarmModule.checkDisplayOverAppsPermission();
@@ -156,18 +287,14 @@ function App() {
       return;
     }
     
-    const now = new Date();
-    const alarmTime = new Date(time);
+    // Calculate the next valid alarm time based on repeat days
+    const nextAlarmTime = calculateNextAlarmTime(time, selectedRepeatDays);
     
-    // If the time has already passed today, set it for tomorrow
-    if (alarmTime <= now) {
-      alarmTime.setDate(alarmTime.getDate() + 1);
-    }
+    console.log('Current time:', new Date().toLocaleString());
+    console.log('Original selected time:', time.toLocaleString());
+    console.log('Calculated next alarm time:', nextAlarmTime.toLocaleString());
     
-    console.log('Current time:', now.toLocaleString());
-    console.log('Alarm time:', alarmTime.toLocaleString());
-    
-    const triggerTime = alarmTime.getTime();
+    const triggerTime = nextAlarmTime.getTime();
     const alarmId = nextAlarmId;
     
     console.log('About to call AlarmModule.scheduleAlarm with:', { alarmId, triggerTime });
@@ -180,15 +307,24 @@ function App() {
       if (result) {
         const newAlarm: Alarm = {
           id: alarmId,
-          time: alarmTime,
+          time: nextAlarmTime,
           isActive: true,
           repeatDays: selectedRepeatDays,
         };
         
-        setAlarms(prev => [...prev, newAlarm]);
+        const updatedAlarms = [...alarms, newAlarm];
+        setAlarms(updatedAlarms);
         setNextAlarmId(prev => prev + 1);
+        
+        // Save alarms to persistent storage
+        await saveAlarmsToStorage(updatedAlarms);
+        
         setCurrentScreen('home'); // Navigate back to home screen
-        Alert.alert('Success', 'Alarm set successfully!');
+        
+        // Show informative message about when alarm will ring
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const nextDayName = dayNames[nextAlarmTime.getDay()];
+        Alert.alert('Success', `Alarm set for ${nextDayName} at ${nextAlarmTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}!`);
       } else {
         Alert.alert('Error', 'Failed to set alarm');
       }
@@ -201,7 +337,12 @@ function App() {
   const cancelAlarm = async (alarmId: number) => {
     try {
       await AlarmModule.cancelAlarm(alarmId);
-      setAlarms(prev => prev.filter(alarm => alarm.id !== alarmId));
+      const updatedAlarms = alarms.filter(alarm => alarm.id !== alarmId);
+      setAlarms(updatedAlarms);
+      
+      // Save updated alarms to persistent storage
+      await saveAlarmsToStorage(updatedAlarms);
+      
       Alert.alert('Success', 'Alarm cancelled');
     } catch (error) {
       console.error('Error cancelling alarm:', error);
@@ -209,7 +350,7 @@ function App() {
     }
   };
 
-  const checkMathAnswer = () => {
+  const checkMathAnswer = async () => {
     if (!mathProblem) return;
     
     const userAnswerNum = parseInt(userAnswer);
@@ -217,11 +358,67 @@ function App() {
       // Stop the alarm sound
       AlarmModule.stopAlarmSound();
       
-      Alert.alert('Success!', 'Alarm dismissed!');
+      // Reset alarm state FIRST (before any alerts)
+      console.log('Resetting alarm state...');
       setIsAlarmActive(false);
       setMathProblem(null);
       setUserAnswer('');
+      setCurrentAlarmId(null);
       KeepAwake.deactivate();
+      
+      // Handle recurring alarm logic
+      if (currentAlarmId !== null) {
+        const currentAlarm = alarms.find(alarm => alarm.id === currentAlarmId);
+        
+        if (currentAlarm && currentAlarm.repeatDays.length > 0) {
+          // This is a recurring alarm - schedule the next occurrence
+          console.log('Scheduling next occurrence for recurring alarm:', currentAlarmId);
+          
+          // Calculate next occurrence based on repeat days
+          const nextAlarmTime = calculateNextAlarmTime(currentAlarm.time, currentAlarm.repeatDays);
+          
+          // Create new alarm ID for the next occurrence
+          const newAlarmId = nextAlarmId;
+          
+          try {
+            // Schedule the next occurrence
+            const result = await AlarmModule.scheduleAlarm({ 
+              alarmId: newAlarmId, 
+              triggerTime: nextAlarmTime.getTime() 
+            });
+            
+            if (result) {
+              // Update the alarm with new time and ID
+              const updatedAlarms = alarms.map(alarm => 
+                alarm.id === currentAlarmId 
+                  ? { ...alarm, id: newAlarmId, time: nextAlarmTime }
+                  : alarm
+              );
+              
+              setAlarms(updatedAlarms);
+              setNextAlarmId(prev => prev + 1);
+              
+              // Save to storage
+              await saveAlarmsToStorage(updatedAlarms);
+              
+              // Show next occurrence info
+              const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+              const nextDayName = dayNames[nextAlarmTime.getDay()];
+              Alert.alert('Success!', `Alarm dismissed! Next alarm set for ${nextDayName} at ${nextAlarmTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+            } else {
+              Alert.alert('Success!', 'Alarm dismissed!');
+            }
+          } catch (error) {
+            console.error('Error scheduling next occurrence:', error);
+            Alert.alert('Success!', 'Alarm dismissed!');
+          }
+        } else {
+          // Non-recurring alarm - just dismiss
+          Alert.alert('Success!', 'Alarm dismissed!');
+        }
+      } else {
+        Alert.alert('Success!', 'Alarm dismissed!');
+      }
     } else {
       Alert.alert('Wrong Answer!', 'Try again!');
       setUserAnswer('');
@@ -660,6 +857,7 @@ const styles = StyleSheet.create({
     width: 200,
     textAlign: 'center',
     marginBottom: 20,
+    color: 'black',
   },
   submitButton: {
     backgroundColor: '#4CAF50',

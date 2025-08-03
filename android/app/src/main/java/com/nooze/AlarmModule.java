@@ -113,13 +113,14 @@ public class AlarmModule extends ReactContextBaseJavaModule {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_ONE_SHOT
             );
             
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerTime,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                // Use setAlarmClock for more reliable timing (Android 5.0+)
+                alarmManager.setAlarmClock(
+                    new AlarmManager.AlarmClockInfo(triggerTime, pendingIntent),
                     pendingIntent
                 );
             } else {
+                // Fallback for older Android versions
                 alarmManager.setExact(
                     AlarmManager.RTC_WAKEUP,
                     triggerTime,
