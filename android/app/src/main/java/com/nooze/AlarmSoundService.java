@@ -19,6 +19,12 @@ public class AlarmSoundService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "AlarmSoundService started");
+        
+        // Check if this is a restart after being killed
+        if (startId > 1) {
+            Log.d(TAG, "Service restarted, resuming alarm sound");
+        }
+        
         playAlarmSound();
         return START_STICKY; // Restart service if it gets killed
     }
@@ -34,6 +40,26 @@ public class AlarmSoundService extends Service {
             if (mediaPlayer != null) {
                 mediaPlayer.setLooping(true); // Loop the sound
                 mediaPlayer.setVolume(1.0f, 1.0f); // Full volume
+                
+                // Set up completion listener to restart if interrupted
+                mediaPlayer.setOnCompletionListener(mp -> {
+                    Log.d(TAG, "Alarm sound completed, restarting...");
+                    // Restart the sound if it completes unexpectedly
+                    if (isAlarmActive()) {
+                        playAlarmSound();
+                    }
+                });
+                
+                // Set up error listener
+                mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                    Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
+                    // Try to recover by restarting
+                    if (isAlarmActive()) {
+                        playAlarmSound();
+                    }
+                    return true; // Error handled
+                });
+                
                 mediaPlayer.start();
                 Log.d(TAG, "Alarm sound started");
             } else {
@@ -41,7 +67,19 @@ public class AlarmSoundService extends Service {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error playing alarm sound: " + e.getMessage());
+            // Try to recover after a short delay
+            android.os.Handler handler = new android.os.Handler();
+            handler.postDelayed(() -> {
+                if (isAlarmActive()) {
+                    playAlarmSound();
+                }
+            }, 1000);
         }
+    }
+    
+    private boolean isAlarmActive() {
+        return getSharedPreferences("NoozePrefs", MODE_PRIVATE)
+            .getBoolean("isAlarmActive", false);
     }
 
     public void stopAlarmSound() {
@@ -56,6 +94,17 @@ public class AlarmSoundService extends Service {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error stopping alarm sound: " + e.getMessage());
+        }
+    }
+    
+    public void ensureAlarmSoundPlaying() {
+        try {
+            if (mediaPlayer == null || !mediaPlayer.isPlaying()) {
+                Log.d(TAG, "Alarm sound not playing, restarting...");
+                playAlarmSound();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error ensuring alarm sound: " + e.getMessage());
         }
     }
 
