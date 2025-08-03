@@ -42,19 +42,20 @@ public class AlarmModule extends ReactContextBaseJavaModule {
             Intent intent = getCurrentActivity().getIntent();
             boolean isAlarmLaunch = intent != null && intent.getBooleanExtra("isAlarmLaunch", false);
             
-            // Also check shared preferences
+            // Check shared preferences - this is the authoritative source
             boolean isAlarmActive = reactContext.getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE)
                 .getBoolean("isAlarmActive", false);
             
-            boolean shouldShowAlarm = isAlarmLaunch || isAlarmActive;
+            // Only show alarm if BOTH intent flag is set AND shared preference is true
+            // This prevents false positives after solving
+            boolean shouldShowAlarm = isAlarmLaunch && isAlarmActive;
             Log.d(TAG, "checkIfAlarmLaunch: intent=" + isAlarmLaunch + ", sharedPref=" + isAlarmActive + ", result=" + shouldShowAlarm);
             
-            // Clear the shared preference flag if it was set
-            if (isAlarmActive) {
-                reactContext.getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE)
-                    .edit()
-                    .putBoolean("isAlarmActive", false)
-                    .apply();
+            // ALWAYS clear the intent flag to prevent future false positives
+            // This ensures the intent flag doesn't persist across app state changes
+            if (intent != null) {
+                intent.removeExtra("isAlarmLaunch");
+                Log.d(TAG, "Intent flag cleared to prevent future false positives");
             }
             
             promise.resolve(shouldShowAlarm);
@@ -90,6 +91,34 @@ public class AlarmModule extends ReactContextBaseJavaModule {
             promise.resolve(true);
         } catch (Exception e) {
             Log.e(TAG, "Error stopping alarm sound: " + e.getMessage());
+            promise.resolve(false);
+        }
+    }
+
+    @ReactMethod
+    public void clearAlarmActiveFlag(Promise promise) {
+        try {
+            reactContext.getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("isAlarmActive", false)
+                .apply();
+            Log.d(TAG, "Alarm active flag cleared from shared preferences");
+            promise.resolve(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Error clearing alarm active flag: " + e.getMessage());
+            promise.resolve(false);
+        }
+    }
+
+    @ReactMethod
+    public void isAlarmStillActive(Promise promise) {
+        try {
+            boolean isActive = reactContext.getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE)
+                .getBoolean("isAlarmActive", false);
+            Log.d(TAG, "isAlarmStillActive: " + isActive);
+            promise.resolve(isActive);
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking if alarm is still active: " + e.getMessage());
             promise.resolve(false);
         }
     }

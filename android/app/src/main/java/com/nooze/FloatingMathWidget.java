@@ -61,8 +61,14 @@ public class FloatingMathWidget extends Service {
         windowManager.getDefaultDisplay().getMetrics(displayMetrics);
         int screenHeight = displayMetrics.heightPixels;
         
-        // Position widget at 15% from top, but minimum 80dp
-        params.y = Math.max((int)(screenHeight * 0.15), 80);
+        // Adaptive positioning based on screen size
+        // For small screens, position higher; for large screens, position lower
+        int minY = 80;
+        int maxY = (int)(screenHeight * 0.25);
+        int targetY = (int)(screenHeight * 0.15);
+        
+        // Ensure widget is visible and not too close to top
+        params.y = Math.max(minY, Math.min(targetY, maxY));
         
         // Generate math problem
         generateMathProblem();
@@ -88,10 +94,12 @@ public class FloatingMathWidget extends Service {
         // Set up close button (opens app)
         Button openAppButton = floatingView.findViewById(R.id.openAppButton);
         openAppButton.setOnClickListener(v -> {
-            // Open the main app
-            Intent appIntent = new Intent(this, MainActivity.class);
-            appIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(appIntent);
+            // Open the alarm activity (math problem screen) instead of main activity
+            Intent alarmIntent = new Intent(this, AlarmActivity.class);
+            alarmIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            alarmIntent.putExtra("isAlarmLaunch", true);
+            alarmIntent.putExtra("alarmId", alarmId);
+            startActivity(alarmIntent);
             
             // Hide the floating widget
             hideFloatingWidget();
@@ -183,8 +191,13 @@ public class FloatingMathWidget extends Service {
     private void hideFloatingWidget() {
         if (floatingView != null && windowManager != null) {
             try {
-                windowManager.removeView(floatingView);
-                Log.d(TAG, "Floating widget hidden");
+                // Check if view is still attached before trying to remove it
+                if (floatingView.getParent() != null) {
+                    windowManager.removeView(floatingView);
+                    Log.d(TAG, "Floating widget hidden");
+                } else {
+                    Log.d(TAG, "Floating widget already detached - skipping hide");
+                }
             } catch (Exception e) {
                 Log.e(TAG, "Error hiding floating widget: " + e.getMessage());
             }
@@ -197,6 +210,8 @@ public class FloatingMathWidget extends Service {
         hideFloatingWidget();
         super.onDestroy();
     }
+
+
 
     @Override
     public IBinder onBind(Intent intent) {

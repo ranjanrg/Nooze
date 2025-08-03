@@ -5,7 +5,7 @@
  * @format
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -21,12 +21,26 @@ import {
   Linking,
   BackHandler,
   StatusBar,
+  Dimensions,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import KeepAwake from 'react-native-keep-awake';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { AlarmModule } = NativeModules;
+
+// Responsive design utilities
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const scale = screenWidth / 375; // Base width for iPhone X
+
+const normalize = (size: number) => {
+  return Math.round(size * scale);
+};
+
+// Responsive breakpoints
+const isSmallDevice = screenWidth < 360;
+const isMediumDevice = screenWidth >= 360 && screenWidth < 400;
+const isLargeDevice = screenWidth >= 400;
 
 interface Alarm {
   id: number;
@@ -64,6 +78,11 @@ function App() {
   const [currentScreen, setCurrentScreen] = useState<'home' | 'setAlarm'>('home');
   const [selectedRepeatDays, setSelectedRepeatDays] = useState<number[]>([1, 2, 3, 4, 5]); // Monday to Friday
   const [currentAlarmId, setCurrentAlarmId] = useState<number | null>(null);
+  
+  // Use refs to track state to avoid race conditions and stale closures
+  const isAlarmActiveRef = useRef(false);
+  const alarmsRef = useRef<Alarm[]>([]);
+  const lastSolvedTimeRef = useRef<number>(0);
 
   // Load saved alarms when app starts
   useEffect(() => {
@@ -71,6 +90,7 @@ function App() {
       const savedAlarms = await loadAlarmsFromStorage();
       if (savedAlarms.length > 0) {
         setAlarms(savedAlarms);
+        alarmsRef.current = savedAlarms; // Update ref
         // Set nextAlarmId to be higher than the highest existing alarm ID
         const maxId = Math.max(...savedAlarms.map(alarm => alarm.id));
         setNextAlarmId(maxId + 1);
@@ -84,21 +104,27 @@ function App() {
   // Check if app was launched from alarm (only on initial load)
   useEffect(() => {
     const checkAlarmLaunch = async () => {
-      try {
-        const isAlarmLaunch = await AlarmModule.checkIfAlarmLaunch();
-        if (isAlarmLaunch && !isAlarmActive) {
+             try {
+         const isAlarmLaunch = await AlarmModule.checkIfAlarmLaunch();
+         
+         // Add cooldown check to prevent re-triggering after solving
+         const timeSinceLastSolved = Date.now() - lastSolvedTimeRef.current;
+         const isInCooldown = timeSinceLastSolved < 5000; // 5 second cooldown
+         
+         if (isAlarmLaunch && !isAlarmActive && !isInCooldown) {
           console.log('App launched from alarm!');
           setIsAlarmLaunch(true);
           setIsAlarmActive(true);
+          isAlarmActiveRef.current = true;
           setMathProblem(generateMathProblem());
           
-          // Find the alarm that was triggered (the one that's due now)
-          const now = new Date();
-          const triggeredAlarm = alarms.find(alarm => {
-            const alarmTime = new Date(alarm.time);
-            const timeDiff = Math.abs(alarmTime.getTime() - now.getTime());
-            return timeDiff < 60000; // Within 1 minute
-          });
+                     // Find the alarm that was triggered (the one that's due now)
+           const now = new Date();
+           const triggeredAlarm = alarmsRef.current.find(alarm => {
+             const alarmTime = new Date(alarm.time);
+             const timeDiff = Math.abs(alarmTime.getTime() - now.getTime());
+             return timeDiff < 60000; // Within 1 minute
+           });
           
           if (triggeredAlarm) {
             setCurrentAlarmId(triggeredAlarm.id);
@@ -115,20 +141,30 @@ function App() {
 
   // Listen for app state changes to detect when app comes to foreground
   useEffect(() => {
-    const handleAppStateChange = async (nextAppState: string) => {
-      if (nextAppState === 'active' && !isAlarmActive) {
-        // Only check for alarm launch if we're not already in an alarm state
-        try {
-          const isAlarmLaunch = await AlarmModule.checkIfAlarmLaunch();
-          if (isAlarmLaunch && !isAlarmActive) {
-            console.log('App activated from alarm!');
+         const handleAppStateChange = async (nextAppState: string) => {
+       if (nextAppState === 'active') {
+         console.log('🔄 App state changed to active');
+         
+         // Check for alarm launch regardless of current state
+         try {
+           const isAlarmLaunch = await AlarmModule.checkIfAlarmLaunch();
+           console.log('🔍 checkIfAlarmLaunch result:', isAlarmLaunch);
+           
+           // Add cooldown check to prevent re-triggering after solving
+           const timeSinceLastSolved = Date.now() - lastSolvedTimeRef.current;
+           const isInCooldown = timeSinceLastSolved < 5000; // 5 second cooldown
+           console.log('⏰ Time since last solved:', timeSinceLastSolved, 'ms, In cooldown:', isInCooldown);
+           
+           if (isAlarmLaunch && !isAlarmActiveRef.current && !isInCooldown) {
+            console.log('🚨 App activated from alarm! Starting math problem...');
             setIsAlarmLaunch(true);
             setIsAlarmActive(true);
+            isAlarmActiveRef.current = true;
             setMathProblem(generateMathProblem());
             
             // Find the alarm that was triggered
             const now = new Date();
-            const triggeredAlarm = alarms.find(alarm => {
+            const triggeredAlarm = alarmsRef.current.find(alarm => {
               const alarmTime = new Date(alarm.time);
               const timeDiff = Math.abs(alarmTime.getTime() - now.getTime());
               return timeDiff < 60000; // Within 1 minute
@@ -136,18 +172,20 @@ function App() {
             
             if (triggeredAlarm) {
               setCurrentAlarmId(triggeredAlarm.id);
-              console.log('Current alarm ID set to:', triggeredAlarm.id);
+              console.log('📅 Current alarm ID set to:', triggeredAlarm.id);
             }
+          } else {
+            console.log('❌ Not starting alarm - isAlarmLaunch:', isAlarmLaunch, 'isAlarmActiveRef:', isAlarmActiveRef.current, 'isInCooldown:', isInCooldown);
           }
         } catch (error) {
-          console.log('Error checking alarm launch:', error);
+          console.log('❌ Error checking alarm launch:', error);
         }
       }
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
-  }, [isAlarmActive, alarms]);
+  }, []); // Remove dependencies to prevent re-creation
 
 
 
@@ -314,6 +352,7 @@ function App() {
         
         const updatedAlarms = [...alarms, newAlarm];
         setAlarms(updatedAlarms);
+        alarmsRef.current = updatedAlarms; // Update ref
         setNextAlarmId(prev => prev + 1);
         
         // Save alarms to persistent storage
@@ -337,8 +376,9 @@ function App() {
   const cancelAlarm = async (alarmId: number) => {
     try {
       await AlarmModule.cancelAlarm(alarmId);
-      const updatedAlarms = alarms.filter(alarm => alarm.id !== alarmId);
-      setAlarms(updatedAlarms);
+              const updatedAlarms = alarms.filter(alarm => alarm.id !== alarmId);
+        setAlarms(updatedAlarms);
+        alarmsRef.current = updatedAlarms; // Update ref
       
       // Save updated alarms to persistent storage
       await saveAlarmsToStorage(updatedAlarms);
@@ -355,20 +395,44 @@ function App() {
     
     const userAnswerNum = parseInt(userAnswer);
     if (userAnswerNum === mathProblem.answer) {
-      // Stop the alarm sound
-      AlarmModule.stopAlarmSound();
+      console.log('✅ Correct answer! Stopping alarm...');
       
-      // Reset alarm state FIRST (before any alerts)
-      console.log('Resetting alarm state...');
+      // Stop the alarm sound FIRST
+      try {
+        await AlarmModule.stopAlarmSound();
+        console.log('✅ Alarm sound stopped');
+      } catch (error) {
+        console.log('❌ Error stopping alarm sound:', error);
+      }
+      
+      // Clear the shared preference flag IMMEDIATELY to prevent re-triggering
+      try {
+        await AlarmModule.clearAlarmActiveFlag();
+        console.log('✅ Cleared alarm active flag from shared preferences');
+        
+        // Verify the flag is cleared
+        const isStillActive = await AlarmModule.isAlarmStillActive();
+        console.log('🔍 Verification - isAlarmStillActive:', isStillActive);
+        
+        // Add a small delay to ensure flag is cleared before state changes
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (error) {
+        console.log('❌ Error clearing alarm flag:', error);
+      }
+      
+      // Reset alarm state
+      console.log('🔄 Resetting alarm state...');
       setIsAlarmActive(false);
+      isAlarmActiveRef.current = false;
+      lastSolvedTimeRef.current = Date.now(); // Set cooldown timestamp
       setMathProblem(null);
       setUserAnswer('');
       setCurrentAlarmId(null);
       KeepAwake.deactivate();
       
-      // Handle recurring alarm logic
-      if (currentAlarmId !== null) {
-        const currentAlarm = alarms.find(alarm => alarm.id === currentAlarmId);
+             // Handle recurring alarm logic
+       if (currentAlarmId !== null) {
+         const currentAlarm = alarmsRef.current.find(alarm => alarm.id === currentAlarmId);
         
         if (currentAlarm && currentAlarm.repeatDays.length > 0) {
           // This is a recurring alarm - schedule the next occurrence
@@ -388,14 +452,15 @@ function App() {
             });
             
             if (result) {
-              // Update the alarm with new time and ID
-              const updatedAlarms = alarms.map(alarm => 
-                alarm.id === currentAlarmId 
-                  ? { ...alarm, id: newAlarmId, time: nextAlarmTime }
-                  : alarm
-              );
-              
-              setAlarms(updatedAlarms);
+                                      // Update the alarm with new time and ID
+             const updatedAlarms = alarmsRef.current.map(alarm => 
+               alarm.id === currentAlarmId 
+                 ? { ...alarm, id: newAlarmId, time: nextAlarmTime }
+                 : alarm
+             );
+           
+           setAlarms(updatedAlarms);
+           alarmsRef.current = updatedAlarms; // Update ref
               setNextAlarmId(prev => prev + 1);
               
               // Save to storage
@@ -636,7 +701,7 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#f8f8f8',
-    padding: 20,
+    padding: normalize(20),
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
@@ -651,23 +716,23 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   title: {
-    fontSize: 32,
+    fontSize: normalize(32),
     fontWeight: 'bold',
     color: 'black',
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: normalize(16),
     color: '#666',
-    marginTop: 5,
+    marginTop: normalize(5),
   },
   fab: {
     position: 'absolute',
-    bottom: 120,
+    bottom: normalize(120),
     alignSelf: 'center',
     backgroundColor: 'black',
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: normalize(56),
+    height: normalize(56),
+    borderRadius: normalize(28),
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
@@ -681,29 +746,29 @@ const styles = StyleSheet.create({
   },
   fabText: {
     color: 'white',
-    fontSize: 32,
+    fontSize: normalize(32),
     fontWeight: 'bold',
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: normalize(40),
   },
   emptyStateText: {
-    fontSize: 18,
+    fontSize: normalize(18),
     color: '#666',
-    marginBottom: 8,
+    marginBottom: normalize(8),
   },
   emptyStateSubtext: {
-    fontSize: 14,
+    fontSize: normalize(14),
     color: '#999',
   },
   alarmInfo: {
     flex: 1,
   },
   alarmDate: {
-    fontSize: 12,
+    fontSize: normalize(12),
     color: '#666',
-    marginTop: 2,
+    marginTop: normalize(2),
   },
   headerContent: {
     flexDirection: 'row',
@@ -711,19 +776,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backButton: {
-    padding: 10,
+    padding: normalize(10),
     position: 'absolute',
-    left: 20,
+    left: normalize(20),
     zIndex: 1,
   },
   backButtonText: {
     color: 'black',
-    fontSize: 24,
+    fontSize: normalize(24),
     fontWeight: 'bold',
   },
   headerTitle: {
     color: 'black',
-    fontSize: 72,
+    fontSize: normalize(72),
     fontWeight: '900',
     textAlign: 'center',
   },
@@ -733,58 +798,58 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     color: '#666',
-    fontSize: 18,
+    fontSize: normalize(18),
     marginTop: 0,
     textAlign: 'center',
   },
   setAlarmContent: {
     flex: 1,
-    padding: 20,
+    padding: normalize(20),
     justifyContent: 'flex-start',
-    paddingTop: 40,
+    paddingTop: normalize(40),
   },
   setAlarmTitle: {
-    fontSize: 28,
+    fontSize: normalize(28),
     fontWeight: 'bold',
     color: 'black',
     textAlign: 'left',
-    marginBottom: 20,
+    marginBottom: normalize(20),
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: normalize(18),
     fontWeight: 'bold',
-    marginBottom: 15,
+    marginBottom: normalize(15),
     color: 'black',
   },
   timeInput: {
     borderWidth: 1,
     borderColor: '#e0e0e0',
     borderRadius: 8,
-    padding: 15,
-    marginBottom: 30,
+    padding: normalize(15),
+    marginBottom: normalize(30),
     backgroundColor: '#fafafa',
   },
   timeInputText: {
-    fontSize: 18,
+    fontSize: normalize(18),
     textAlign: 'center',
     color: 'black',
   },
   setAlarmButton: {
     backgroundColor: 'black',
-    padding: 15,
+    padding: normalize(15),
     borderRadius: 8,
     alignItems: 'center',
-    marginTop: 30,
+    marginTop: normalize(30),
   },
   setAlarmButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: normalize(16),
     fontWeight: 'bold',
   },
   alarmsSection: {
-    padding: 20,
+    padding: normalize(20),
     backgroundColor: '#fafafa',
-    margin: 10,
+    margin: normalize(10),
     borderRadius: 10,
     elevation: 2,
     borderWidth: 1,
@@ -799,26 +864,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 15,
+    paddingVertical: normalize(15),
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
   alarmTime: {
-    fontSize: 18,
+    fontSize: normalize(18),
     color: 'black',
     fontWeight: 'bold',
   },
   cancelButton: {
     backgroundColor: 'black',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
+    paddingHorizontal: normalize(15),
+    paddingVertical: normalize(8),
     borderRadius: 5,
     borderWidth: 1,
     borderColor: 'black',
   },
   cancelButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: normalize(14),
   },
 
   alarmContainer: {
@@ -829,116 +894,116 @@ const styles = StyleSheet.create({
   },
   alarmContent: {
     alignItems: 'center',
-    padding: 20,
+    padding: normalize(20),
   },
   alarmTitle: {
-    fontSize: 48,
+    fontSize: normalize(48),
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 10,
+    marginBottom: normalize(10),
   },
   alarmSubtitle: {
-    fontSize: 18,
+    fontSize: normalize(18),
     color: 'white',
-    marginBottom: 40,
+    marginBottom: normalize(40),
     textAlign: 'center',
   },
   mathProblem: {
-    fontSize: 36,
+    fontSize: normalize(36),
     color: 'white',
-    marginBottom: 30,
+    marginBottom: normalize(30),
     fontWeight: 'bold',
   },
   answerInput: {
     backgroundColor: 'white',
-    padding: 15,
+    padding: normalize(15),
     borderRadius: 8,
-    fontSize: 24,
-    width: 200,
+    fontSize: normalize(24),
+    width: normalize(200),
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: normalize(20),
     color: 'black',
   },
   submitButton: {
     backgroundColor: '#4CAF50',
-    padding: 15,
+    padding: normalize(15),
     borderRadius: 8,
-    minWidth: 150,
+    minWidth: normalize(150),
     alignItems: 'center',
   },
   submitButtonText: {
     color: 'white',
-    fontSize: 18,
+    fontSize: normalize(18),
     fontWeight: 'bold',
   },
   warningText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: normalize(14),
     textAlign: 'center',
-    marginTop: 20,
+    marginTop: normalize(20),
     fontStyle: 'italic',
   },
   permissionPromptContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: normalize(20),
     backgroundColor: '#f5f5f5',
   },
   permissionPromptTitle: {
-    fontSize: 24,
+    fontSize: normalize(24),
     fontWeight: 'bold',
     color: '#333',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: normalize(20),
   },
   permissionPromptDescription: {
-    fontSize: 16,
+    fontSize: normalize(16),
     color: '#666',
     textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 30,
-    paddingHorizontal: 20,
+    lineHeight: normalize(24),
+    marginBottom: normalize(30),
+    paddingHorizontal: normalize(20),
   },
   permissionPromptButton: {
     backgroundColor: '#2196F3',
-    paddingHorizontal: 30,
-    paddingVertical: 15,
+    paddingHorizontal: normalize(30),
+    paddingVertical: normalize(15),
     borderRadius: 8,
-    marginBottom: 15,
-    minWidth: 120,
+    marginBottom: normalize(15),
+    minWidth: normalize(120),
     alignItems: 'center',
   },
   permissionPromptButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: normalize(16),
     fontWeight: 'bold',
   },
   permissionPromptCancelButton: {
-    paddingVertical: 10,
+    paddingVertical: normalize(10),
   },
   permissionPromptCancelText: {
     color: '#666',
-    fontSize: 16,
+    fontSize: normalize(16),
   },
   repeatTitle: {
-    fontSize: 28,
+    fontSize: normalize(28),
     fontWeight: 'bold',
     color: 'black',
-    marginTop: 20,
-    marginBottom: 15,
+    marginTop: normalize(20),
+    marginBottom: normalize(15),
     textAlign: 'left',
   },
   repeatDaysContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: 30,
-    paddingHorizontal: 20,
+    marginBottom: normalize(30),
+    paddingHorizontal: normalize(20),
   },
   repeatDayButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: normalize(40),
+    height: normalize(40),
+    borderRadius: normalize(20),
     borderWidth: 1,
     borderColor: '#e0e0e0',
     backgroundColor: '#fafafa',
@@ -950,7 +1015,7 @@ const styles = StyleSheet.create({
     borderColor: 'black',
   },
   repeatDayText: {
-    fontSize: 12,
+    fontSize: normalize(12),
     fontWeight: 'bold',
     color: '#666',
   },

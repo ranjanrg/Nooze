@@ -10,6 +10,7 @@ import android.content.Context;
 import android.view.View;
 import android.view.Window;
 import android.view.MotionEvent;
+import android.util.Log;
 import com.facebook.react.ReactActivity;
 import com.facebook.react.ReactActivityDelegate;
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint;
@@ -82,95 +83,65 @@ public class AlarmActivity extends ReactActivity {
         );
     }
 
-    // Override back button to prevent escape
+    // Allow back button (user-friendly approach)
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        // Prevent ALL navigation keys
-        if (keyCode == KeyEvent.KEYCODE_BACK || 
-            keyCode == KeyEvent.KEYCODE_HOME || 
-            keyCode == KeyEvent.KEYCODE_APP_SWITCH ||
-            keyCode == KeyEvent.KEYCODE_MENU ||
-            keyCode == KeyEvent.KEYCODE_TAB ||
-            keyCode == KeyEvent.KEYCODE_ESCAPE) {
-            return true; // Consume the event, don't let it propagate
-        }
+        // Allow navigation keys - user can exit
         return super.onKeyDown(keyCode, event);
     }
 
-    // Override onBackPressed for newer Android versions
+    // Allow back button (user-friendly approach)
     @Override
     public void onBackPressed() {
-        // Do nothing - prevent back button from closing the activity
+        // Allow back button - user can exit
+        super.onBackPressed();
     }
 
-    // Prevent user from leaving the activity (blocks home gesture)
+    // Allow user to leave the activity (user-friendly approach)
     @Override
     public void onUserLeaveHint() {
-        // Do nothing - prevent user from leaving the activity
-        // This should block home gesture and other system navigation
+        // Check if alarm is still active before starting floating widget
+        boolean isAlarmActive = getSharedPreferences("NoozePrefs", MODE_PRIVATE)
+            .getBoolean("isAlarmActive", false);
+        
+        if (isAlarmActive) {
+            // User is trying to leave without solving - start floating widget
+            Log.d("AlarmActivity", "User leaving activity without solving - starting floating widget");
+            
+            // Start floating math widget
+            Intent widgetIntent = new Intent(this, FloatingMathWidget.class);
+            widgetIntent.putExtra("alarmId", getIntent().getIntExtra("alarmId", -1));
+            startService(widgetIntent);
+        } else {
+            Log.d("AlarmActivity", "User leaving activity after solving - no floating widget needed");
+        }
+        
+        super.onUserLeaveHint();
     }
 
-    // Prevent activity from being paused (blocks home gesture)
+    // Handle activity pause (user-friendly approach)
     @Override
     protected void onPause() {
-        // Don't call super.onPause() to prevent activity from being paused
-        // This makes the activity stay in foreground even when home is pressed
+        // Check if alarm is still active before restarting sound service
+        boolean isAlarmActive = getSharedPreferences("NoozePrefs", MODE_PRIVATE)
+            .getBoolean("isAlarmActive", false);
         
-        // Ensure alarm sound continues playing even when activity is paused
-        Intent soundIntent = new Intent(this, AlarmSoundService.class);
-        startService(soundIntent);
+        if (isAlarmActive) {
+            // Only restart sound service if alarm is still active
+            Log.d("AlarmActivity", "Alarm still active - restarting sound service");
+            Intent soundIntent = new Intent(this, AlarmSoundService.class);
+            startService(soundIntent);
+        } else {
+            Log.d("AlarmActivity", "Alarm solved - not restarting sound service");
+        }
+        
+        super.onPause();
     }
 
-    // Block gesture navigation by intercepting touch events
+    // Allow touch events (user-friendly approach)
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        // Block edge swipes that could trigger gesture navigation
-        if (ev.getAction() == MotionEvent.ACTION_DOWN) {
-            float x = ev.getX();
-            float y = ev.getY();
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            int screenHeight = getResources().getDisplayMetrics().heightPixels;
-            
-            // Allow emergency stop area (bottom center) - exempt from blocking
-            boolean isEmergencyStopArea = (x > screenWidth * 0.3 && x < screenWidth * 0.7 && y > screenHeight * 0.85);
-            
-            if (!isEmergencyStopArea) {
-                // Block bottom edge swipes (home gesture) - VERY aggressive
-                if (y > screenHeight * 0.6) {
-                    return true; // Consume the event
-                }
-                
-                // Block left/right edge swipes (back gesture) - more aggressive
-                if (x < screenWidth * 0.2 || x > screenWidth * 0.8) {
-                    return true; // Consume the event
-                }
-                
-                // Block diagonal swipes (corner gestures)
-                if ((x < screenWidth * 0.15 && y > screenHeight * 0.7) ||
-                    (x > screenWidth * 0.85 && y > screenHeight * 0.7)) {
-                    return true; // Consume the event
-                }
-            }
-        }
-        
-        // Block long press gestures that might trigger system actions
-        if (ev.getAction() == MotionEvent.ACTION_MOVE) {
-            float x = ev.getX();
-            float y = ev.getY();
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            int screenHeight = getResources().getDisplayMetrics().heightPixels;
-            
-            // Allow emergency stop area
-            boolean isEmergencyStopArea = (x > screenWidth * 0.3 && x < screenWidth * 0.7 && y > screenHeight * 0.85);
-            
-            if (!isEmergencyStopArea) {
-                // Block edge movements - VERY aggressive
-                if (y > screenHeight * 0.6 || x < screenWidth * 0.2 || x > screenWidth * 0.8) {
-                    return true; // Consume the event
-                }
-            }
-        }
-        
+        // Allow all touch events - user can interact normally
         return super.dispatchTouchEvent(ev);
     }
 

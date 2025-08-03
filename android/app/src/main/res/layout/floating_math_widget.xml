@@ -6,8 +6,8 @@
     android:background="#D32F2F"
     android:padding="15dp"
     android:gravity="center"
-    android:minWidth="280dp"
-    android:maxWidth="320dp">
+    android:minWidth="260dp"
+    android:maxWidth="340dp">
 
     <TextView
         android:layout_width="wrap_content"

@@ -31,10 +31,8 @@ public class AlarmReceiver extends BroadcastReceiver {
         Intent soundIntent = new Intent(context, AlarmSoundService.class);
         context.startService(soundIntent);
         
-        // Start floating math widget (appears on home screen)
-        Intent widgetIntent = new Intent(context, FloatingMathWidget.class);
-        widgetIntent.putExtra("alarmId", alarmId);
-        context.startService(widgetIntent);
+        // Note: Floating widget will be started only when user exits the math screen
+        // We don't start it here to avoid showing both full screen and floating widget
         
         // Create intent to launch AlarmActivity
         Intent alarmIntent = new Intent(context, AlarmActivity.class);

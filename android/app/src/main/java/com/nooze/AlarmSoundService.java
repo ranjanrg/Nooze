@@ -22,10 +22,17 @@ public class AlarmSoundService extends Service {
         
         // Check if this is a restart after being killed
         if (startId > 1) {
-            Log.d(TAG, "Service restarted, resuming alarm sound");
+            Log.d(TAG, "Service restarted, checking if alarm is still active");
+            // Only resume if alarm is still active
+            if (!isAlarmActive()) {
+                Log.d(TAG, "Alarm no longer active, stopping service");
+                stopSelf();
+                return START_NOT_STICKY;
+            }
         }
         
         playAlarmSound();
+        
         return START_STICKY; // Restart service if it gets killed
     }
 
@@ -43,19 +50,27 @@ public class AlarmSoundService extends Service {
                 
                 // Set up completion listener to restart if interrupted
                 mediaPlayer.setOnCompletionListener(mp -> {
-                    Log.d(TAG, "Alarm sound completed, restarting...");
-                    // Restart the sound if it completes unexpectedly
+                    Log.d(TAG, "Alarm sound completed, checking if should restart...");
+                    // Only restart the sound if alarm is still active
                     if (isAlarmActive()) {
+                        Log.d(TAG, "Alarm still active, restarting sound...");
                         playAlarmSound();
+                    } else {
+                        Log.d(TAG, "Alarm no longer active, stopping service");
+                        stopSelf();
                     }
                 });
                 
                 // Set up error listener
                 mediaPlayer.setOnErrorListener((mp, what, extra) -> {
                     Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
-                    // Try to recover by restarting
+                    // Only try to recover if alarm is still active
                     if (isAlarmActive()) {
+                        Log.d(TAG, "Alarm still active, trying to recover...");
                         playAlarmSound();
+                    } else {
+                        Log.d(TAG, "Alarm no longer active, stopping service");
+                        stopSelf();
                     }
                     return true; // Error handled
                 });
@@ -67,11 +82,15 @@ public class AlarmSoundService extends Service {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error playing alarm sound: " + e.getMessage());
-            // Try to recover after a short delay
+            // Try to recover after a short delay only if alarm is still active
             android.os.Handler handler = new android.os.Handler();
             handler.postDelayed(() -> {
                 if (isAlarmActive()) {
+                    Log.d(TAG, "Alarm still active, retrying after error...");
                     playAlarmSound();
+                } else {
+                    Log.d(TAG, "Alarm no longer active, stopping service after error");
+                    stopSelf();
                 }
             }, 1000);
         }
@@ -81,6 +100,8 @@ public class AlarmSoundService extends Service {
         return getSharedPreferences("NoozePrefs", MODE_PRIVATE)
             .getBoolean("isAlarmActive", false);
     }
+    
+
 
     public void stopAlarmSound() {
         try {
@@ -92,6 +113,9 @@ public class AlarmSoundService extends Service {
                 mediaPlayer = null;
                 Log.d(TAG, "Alarm sound stopped");
             }
+            // Stop the service completely when sound is stopped
+            Log.d(TAG, "Stopping service after sound stop");
+            stopSelf();
         } catch (Exception e) {
             Log.e(TAG, "Error stopping alarm sound: " + e.getMessage());
         }
