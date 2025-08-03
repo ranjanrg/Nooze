@@ -27,6 +27,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import KeepAwake from 'react-native-keep-awake';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+
+
 const { AlarmModule } = NativeModules;
 
 // Responsive design utilities
@@ -100,6 +102,8 @@ function App() {
     
     loadSavedAlarms();
   }, []);
+
+
 
   // Check if app was launched from alarm (only on initial load)
   useEffect(() => {
