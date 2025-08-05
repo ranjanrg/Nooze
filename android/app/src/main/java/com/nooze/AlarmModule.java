@@ -85,7 +85,7 @@ public class AlarmModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void stopAlarmSound(Promise promise) {
         try {
-            Intent intent = new Intent(reactContext, AlarmSoundService.class);
+            Intent intent = new Intent(reactContext, AlarmService.class);
             reactContext.stopService(intent);
             Log.d(TAG, "Alarm sound stop requested");
             promise.resolve(true);
@@ -124,6 +124,21 @@ public class AlarmModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void saveAlarmsForBoot(String alarmsJson, Promise promise) {
+        try {
+            reactContext.getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE)
+                .edit()
+                .putString("savedAlarms", alarmsJson)
+                .apply();
+            Log.d(TAG, "Alarms saved for boot restoration: " + alarmsJson);
+            promise.resolve(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving alarms for boot: " + e.getMessage());
+            promise.resolve(false);
+        }
+    }
+
+    @ReactMethod
     public void scheduleAlarm(ReadableMap alarmData, Promise promise) {
         Log.d(TAG, "scheduleAlarm called with data: " + alarmData.toString());
         try {
@@ -131,23 +146,46 @@ public class AlarmModule extends ReactContextBaseJavaModule {
             int alarmId = alarmData.getInt("alarmId");
             Log.d(TAG, "Parsed triggerTime: " + triggerTime + ", alarmId: " + alarmId);
             
-            Intent intent = new Intent(reactContext, AlarmReceiver.class);
-            intent.setAction("com.nooze.ALARM_TRIGGER");
-            intent.putExtra("alarmId", alarmId);
+            Intent intent = new Intent(reactContext, AlarmBroadcastReceiver.class);
+            intent.putExtra("ALARM_ID", alarmId);
+            intent.putExtra("TITLE", "Alarm " + alarmId);
+            intent.putExtra("RECURRING", false);
+            intent.putExtra("MONDAY", false);
+            intent.putExtra("TUESDAY", false);
+            intent.putExtra("WEDNESDAY", false);
+            intent.putExtra("THURSDAY", false);
+            intent.putExtra("FRIDAY", false);
+            intent.putExtra("SATURDAY", false);
+            intent.putExtra("SUNDAY", false);
+            
+            // Use appropriate PendingIntent flags based on alarm type
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
             
             PendingIntent pendingIntent = PendingIntent.getBroadcast(
                 reactContext,
                 alarmId,
                 intent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_ONE_SHOT
+                flags
             );
             
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                // Use setAlarmClock for more reliable timing (Android 5.0+)
+            // Choose the best alarm scheduling method based on Android version and requirements
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // Android 6.0+ (API 23+): Use setExactAndAllowWhileIdle for better Doze compatibility
+                // This is the recommended approach for critical alarms that need to fire even in Doze mode
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                );
+                Log.d(TAG, "Scheduled alarm using setExactAndAllowWhileIdle (Android 6.0+)");
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                // Android 5.0+ (API 21+): Use setAlarmClock for critical wake-up alarms
+                // This provides the most reliable timing but uses more resources
                 alarmManager.setAlarmClock(
                     new AlarmManager.AlarmClockInfo(triggerTime, pendingIntent),
                     pendingIntent
                 );
+                Log.d(TAG, "Scheduled alarm using setAlarmClock (Android 5.0+)");
             } else {
                 // Fallback for older Android versions
                 alarmManager.setExact(
@@ -155,9 +193,10 @@ public class AlarmModule extends ReactContextBaseJavaModule {
                     triggerTime,
                     pendingIntent
                 );
+                Log.d(TAG, "Scheduled alarm using setExact (Legacy Android)");
             }
             
-            Log.d(TAG, "Alarm scheduled for: " + triggerTime);
+            Log.d(TAG, "Alarm scheduled for: " + triggerTime + " (ID: " + alarmId + ")");
             promise.resolve(true);
             
         } catch (Exception e) {
@@ -169,8 +208,7 @@ public class AlarmModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void cancelAlarm(int alarmId, Promise promise) {
         try {
-            Intent intent = new Intent(reactContext, AlarmReceiver.class);
-            intent.setAction("com.nooze.ALARM_TRIGGER");
+            Intent intent = new Intent(reactContext, AlarmBroadcastReceiver.class);
             PendingIntent pendingIntent = PendingIntent.getBroadcast(
                 reactContext,
                 alarmId,
@@ -182,6 +220,8 @@ public class AlarmModule extends ReactContextBaseJavaModule {
                 alarmManager.cancel(pendingIntent);
                 pendingIntent.cancel();
                 Log.d(TAG, "Alarm cancelled: " + alarmId);
+            } else {
+                Log.d(TAG, "No pending intent found for alarm: " + alarmId);
             }
             
             promise.resolve(true);

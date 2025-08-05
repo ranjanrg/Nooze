@@ -249,6 +249,20 @@ function App() {
       }));
       await AsyncStorage.setItem('nooze_alarms', JSON.stringify(alarmsData));
       console.log('Alarms saved to storage:', alarmsToSave.length);
+      
+      // Also save in a format that BootReceiver can read (SharedPreferences)
+      const bootAlarmsData = alarmsToSave.map(alarm => ({
+        id: alarm.id,
+        triggerTime: alarm.time.getTime(), // Store as timestamp for native code
+        isActive: alarm.isActive,
+        repeatDays: alarm.repeatDays
+      }));
+      
+      // Save to SharedPreferences for boot restoration
+      const { AlarmModule } = NativeModules;
+      if (AlarmModule.saveAlarmsForBoot) {
+        await AlarmModule.saveAlarmsForBoot(JSON.stringify(bootAlarmsData));
+      }
     } catch (error) {
       console.error('Error saving alarms to storage:', error);
     }
