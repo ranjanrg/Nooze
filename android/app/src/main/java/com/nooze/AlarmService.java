@@ -164,14 +164,15 @@ public class AlarmService extends Service {
             isVibrating = true;
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Gentler vibration pattern: shorter pulses, longer pauses
                 vibrator.vibrate(VibrationEffect.createWaveform(
-                    new long[]{0, 100, 100, 1000}, // Pattern: wait, vibrate, wait, pause
+                    new long[]{0, 50, 200, 50, 200, 50, 1500}, // Pattern: wait, vibrate, wait, vibrate, wait, vibrate, longer pause
                     0 // Repeat indefinitely
                 ));
-                Log.d(TAG, "Vibration started (Android O+)");
+                Log.d(TAG, "Gentle vibration started (Android O+)");
             } else {
-                vibrator.vibrate(new long[]{0, 100, 100, 1000}, 0);
-                Log.d(TAG, "Vibration started (Legacy Android)");
+                vibrator.vibrate(new long[]{0, 50, 200, 50, 200, 50, 1500}, 0);
+                Log.d(TAG, "Gentle vibration started (Legacy Android)");
             }
         } else {
             Log.d(TAG, "Vibration not started - vibrator null or already vibrating");

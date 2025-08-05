@@ -22,6 +22,7 @@ import {
   BackHandler,
   StatusBar,
   Dimensions,
+  Modal,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import KeepAwake from 'react-native-keep-awake';
@@ -80,6 +81,12 @@ function App() {
   const [currentScreen, setCurrentScreen] = useState<'home' | 'setAlarm'>('home');
   const [selectedRepeatDays, setSelectedRepeatDays] = useState<number[]>([1, 2, 3, 4, 5]); // Monday to Friday
   const [currentAlarmId, setCurrentAlarmId] = useState<number | null>(null);
+  const [customAlert, setCustomAlert] = useState<{ visible: boolean; title: string; message: string; type: 'success' | 'error' }>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'success'
+  });
   
   // Use refs to track state to avoid race conditions and stale closures
   const isAlarmActiveRef = useRef(false);
@@ -381,13 +388,13 @@ function App() {
         // Show informative message about when alarm will ring
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const nextDayName = dayNames[nextAlarmTime.getDay()];
-        Alert.alert('Success', `Alarm set for ${nextDayName} at ${nextAlarmTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}!`);
+        showCustomAlert('Success', `Alarm set for ${nextDayName} at ${nextAlarmTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}!`, 'success');
       } else {
-        Alert.alert('Error', 'Failed to set alarm');
+        showCustomAlert('Error', 'Failed to set alarm', 'error');
       }
     } catch (error) {
       console.error('Error scheduling alarm:', error);
-      Alert.alert('Error', 'Failed to set alarm');
+      showCustomAlert('Error', 'Failed to set alarm', 'error');
     }
   };
 
@@ -401,10 +408,10 @@ function App() {
       // Save updated alarms to persistent storage
       await saveAlarmsToStorage(updatedAlarms);
       
-      Alert.alert('Success', 'Alarm cancelled');
+      showCustomAlert('Success', 'Alarm cancelled', 'success');
     } catch (error) {
       console.error('Error cancelling alarm:', error);
-      Alert.alert('Error', 'Failed to cancel alarm');
+      showCustomAlert('Error', 'Failed to cancel alarm', 'error');
     }
   };
 
@@ -487,23 +494,23 @@ function App() {
               // Show next occurrence info
               const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
               const nextDayName = dayNames[nextAlarmTime.getDay()];
-              Alert.alert('Success!', `Alarm dismissed! Next alarm set for ${nextDayName} at ${nextAlarmTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+              showCustomAlert('Success!', `Alarm dismissed! Next alarm set for ${nextDayName} at ${nextAlarmTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
             } else {
-              Alert.alert('Success!', 'Alarm dismissed!');
+              showCustomAlert('Success!', 'Alarm dismissed!', 'success');
             }
           } catch (error) {
             console.error('Error scheduling next occurrence:', error);
-            Alert.alert('Success!', 'Alarm dismissed!');
+            showCustomAlert('Success!', 'Alarm dismissed!', 'success');
           }
         } else {
           // Non-recurring alarm - just dismiss
-          Alert.alert('Success!', 'Alarm dismissed!');
+          showCustomAlert('Success!', 'Alarm dismissed!', 'success');
         }
       } else {
-        Alert.alert('Success!', 'Alarm dismissed!');
+        showCustomAlert('Success!', 'Alarm dismissed!', 'success');
       }
     } else {
-      Alert.alert('Wrong Answer!', 'Try again!');
+      showCustomAlert('Wrong Answer!', 'Try again!', 'error');
       setUserAnswer('');
     }
   };
@@ -511,6 +518,19 @@ function App() {
   const startAlarm = () => {
     setIsAlarmActive(true);
     setMathProblem(generateMathProblem());
+  };
+
+  const showCustomAlert = (title: string, message: string, type: 'success' | 'error' = 'success') => {
+    setCustomAlert({
+      visible: true,
+      title,
+      message,
+      type
+    });
+  };
+
+  const hideCustomAlert = () => {
+    setCustomAlert(prev => ({ ...prev, visible: false }));
   };
 
   const openSettings = () => {
@@ -547,7 +567,7 @@ function App() {
 
   // Permission prompt modal
   if (showPermissionPrompt) {
-    return (
+  return (
       <SafeAreaView style={styles.container}>
         <View style={styles.permissionPromptContainer}>
           <Text style={styles.permissionPromptTitle}>Permission Required</Text>
@@ -647,9 +667,13 @@ function App() {
         <Text style={styles.setAlarmTitle}>Choose Alarm Time</Text>
         
         <TouchableOpacity style={styles.timeInput} onPress={() => setShowTimePicker(true)}>
-          <Text style={styles.timeInputText}>
-            {selectedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
+          <View style={styles.timeInputContent}>
+            <Text style={styles.timeInputLabel}>Set Time</Text>
+            <Text style={styles.timeInputText}>
+              {selectedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+            <Text style={styles.timeInputHint}>Tap to change</Text>
+          </View>
         </TouchableOpacity>
         
         {showTimePicker && (
@@ -657,7 +681,7 @@ function App() {
             value={selectedTime}
             mode="time"
             is24Hour={false}
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            display="spinner"
             onChange={(event, date) => {
               setShowTimePicker(Platform.OS === 'ios');
               if (date) {
@@ -700,67 +724,116 @@ function App() {
         >
           <Text style={styles.setAlarmButtonText}>Set Alarm</Text>
         </TouchableOpacity>
-      </View>
+    </View>
     </SafeAreaView>
+  );
+
+  // Custom Alert Component
+  const renderCustomAlert = () => (
+    <Modal
+      visible={customAlert.visible}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={hideCustomAlert}
+    >
+      <View style={styles.alertOverlay}>
+        <View style={styles.alertContainer}>
+          <View style={[
+            styles.alertHeader,
+            { backgroundColor: customAlert.type === 'success' ? '#F9F9F9' : '#FFB347' }
+          ]}>
+            <Text style={[
+              styles.alertTitle,
+              { fontWeight: customAlert.type === 'success' ? 'bold' : 'normal' }
+            ]}>{customAlert.title}</Text>
+          </View>
+          <View style={styles.alertBody}>
+            <Text style={[
+              styles.alertMessage,
+              { fontWeight: customAlert.type === 'success' ? 'bold' : 'normal' }
+            ]}>{customAlert.message}</Text>
+          </View>
+          <TouchableOpacity 
+            style={[
+              styles.alertButton,
+              { backgroundColor: '#A7C7E7' } // Always Soft Blue
+            ]}
+            onPress={hideCustomAlert}
+          >
+            <Text style={styles.alertButtonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
 
   // Main render
   if (currentScreen === 'setAlarm') {
-    return renderSetAlarmScreen();
+    return (
+      <>
+        {renderSetAlarmScreen()}
+        {renderCustomAlert()}
+      </>
+    );
   }
 
-  return renderHomeScreen();
+  return (
+    <>
+      {renderHomeScreen()}
+      {renderCustomAlert()}
+    </>
+  );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#F9F9F9', // Off-White background for serenity
   },
   header: {
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#F9F9F9', // Off-White background
     padding: normalize(20),
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: '#E8E8E8', // Subtle border
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 4,
   },
   title: {
     fontSize: normalize(32),
     fontWeight: 'bold',
-    color: 'black',
+    color: '#3C3C3C', // Slate Gray for clarity
   },
   subtitle: {
     fontSize: normalize(16),
-    color: '#666',
+    color: '#666666',
     marginTop: normalize(5),
   },
   fab: {
     position: 'absolute',
     bottom: normalize(120),
     alignSelf: 'center',
-    backgroundColor: 'black',
-    width: normalize(56),
-    height: normalize(56),
-    borderRadius: normalize(28),
+    backgroundColor: '#FFB347', // Sunrise Orange for energy and call-to-action
+    width: normalize(64),
+    height: normalize(64),
+    borderRadius: normalize(32),
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#000',
+    elevation: 12,
+    shadowColor: '#FFB347',
     shadowOffset: {
       width: 0,
-      height: 4,
+      height: 6,
     },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
   },
   fabText: {
     color: 'white',
@@ -769,24 +842,29 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: normalize(40),
+    paddingVertical: normalize(60),
+    paddingHorizontal: normalize(20),
   },
   emptyStateText: {
-    fontSize: normalize(18),
-    color: '#666',
-    marginBottom: normalize(8),
+    fontSize: normalize(20),
+    color: '#3C3C3C', // Slate Gray for clarity
+    marginBottom: normalize(12),
+    fontWeight: '600',
   },
   emptyStateSubtext: {
-    fontSize: normalize(14),
-    color: '#999',
+    fontSize: normalize(16),
+    color: '#666666',
+    textAlign: 'center',
+    lineHeight: normalize(24),
   },
   alarmInfo: {
     flex: 1,
   },
   alarmDate: {
-    fontSize: normalize(12),
-    color: '#666',
-    marginTop: normalize(2),
+    fontSize: normalize(14),
+    color: '#666666',
+    marginTop: normalize(4),
+    fontWeight: '500',
   },
   headerContent: {
     flexDirection: 'row',
@@ -805,20 +883,22 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   headerTitle: {
-    color: 'black',
-    fontSize: normalize(72),
+    color: '#3C3C3C', // Slate Gray for clarity
+    fontSize: normalize(64),
     fontWeight: '900',
     textAlign: 'center',
+    letterSpacing: -1,
   },
   headerTextContainer: {
     flex: 1,
     alignItems: 'center',
   },
   headerSubtitle: {
-    color: '#666',
+    color: '#666666',
     fontSize: normalize(18),
-    marginTop: 0,
+    marginTop: normalize(4),
     textAlign: 'center',
+    fontWeight: '500',
   },
   setAlarmContent: {
     flex: 1,
@@ -827,51 +907,95 @@ const styles = StyleSheet.create({
     paddingTop: normalize(40),
   },
   setAlarmTitle: {
-    fontSize: normalize(28),
+    fontSize: normalize(32),
     fontWeight: 'bold',
-    color: 'black',
+    color: '#3C3C3C', // Slate Gray for clarity
     textAlign: 'left',
-    marginBottom: normalize(20),
+    marginBottom: normalize(24),
+    letterSpacing: -0.5,
   },
   sectionTitle: {
-    fontSize: normalize(18),
+    fontSize: normalize(20),
     fontWeight: 'bold',
-    marginBottom: normalize(15),
-    color: 'black',
+    marginBottom: normalize(20),
+    color: '#3C3C3C', // Slate Gray for clarity
   },
   timeInput: {
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    padding: normalize(15),
+    borderWidth: 2,
+    borderColor: '#A7C7E7', // Soft Blue border
+    borderRadius: 16,
+    padding: normalize(24),
     marginBottom: normalize(30),
-    backgroundColor: '#fafafa',
+    backgroundColor: '#FFFFFF',
+    elevation: 4,
+    shadowColor: '#A7C7E7',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  timeInputContent: {
+    alignItems: 'center',
+  },
+  timeInputLabel: {
+    fontSize: normalize(14),
+    color: '#666666',
+    fontWeight: '600',
+    marginBottom: normalize(8),
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   timeInputText: {
-    fontSize: normalize(18),
+    fontSize: normalize(32),
     textAlign: 'center',
-    color: 'black',
+    color: '#3C3C3C', // Slate Gray
+    fontWeight: 'bold',
+    marginBottom: normalize(8),
   },
+  timeInputHint: {
+    fontSize: normalize(12),
+    color: '#A7C7E7', // Soft Blue
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
+
   setAlarmButton: {
-    backgroundColor: 'black',
-    padding: normalize(15),
-    borderRadius: 8,
+    backgroundColor: '#FFB347', // Sunrise Orange for energy and call-to-action
+    padding: normalize(18),
+    borderRadius: 16,
     alignItems: 'center',
-    marginTop: normalize(30),
+    marginTop: normalize(40),
+    elevation: 8,
+    shadowColor: '#FFB347',
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
   },
   setAlarmButtonText: {
-    color: 'white',
-    fontSize: normalize(16),
+    color: '#FFFFFF',
+    fontSize: normalize(18),
     fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
   alarmsSection: {
-    padding: normalize(20),
-    backgroundColor: '#fafafa',
-    margin: normalize(10),
-    borderRadius: 10,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    padding: normalize(24),
+    backgroundColor: '#C6E7C1', // Sage Green for growth and balance
+    margin: normalize(16),
+    borderRadius: 16,
+    elevation: 6,
+    shadowColor: '#C6E7C1',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    borderWidth: 0,
   },
   noAlarmsText: {
     textAlign: 'center',
@@ -882,26 +1006,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: normalize(15),
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    paddingVertical: normalize(18),
+    paddingHorizontal: normalize(16),
+    marginBottom: normalize(12),
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   alarmTime: {
-    fontSize: normalize(18),
-    color: 'black',
+    fontSize: normalize(20),
+    color: '#3C3C3C', // Slate Gray for clarity
     fontWeight: 'bold',
   },
   cancelButton: {
-    backgroundColor: 'black',
-    paddingHorizontal: normalize(15),
-    paddingVertical: normalize(8),
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: 'black',
+    backgroundColor: '#A7C7E7', // Soft Blue for calm and trust
+    paddingHorizontal: normalize(20),
+    paddingVertical: normalize(10),
+    borderRadius: 8,
+    borderWidth: 0,
+    elevation: 2,
+    shadowColor: '#A7C7E7',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   cancelButtonText: {
-    color: 'white',
+    color: '#3C3C3C', // Slate Gray for readability
     fontSize: normalize(14),
+    fontWeight: '600',
   },
 
   alarmContainer: {
@@ -1005,40 +1147,119 @@ const styles = StyleSheet.create({
     fontSize: normalize(16),
   },
   repeatTitle: {
-    fontSize: normalize(28),
+    fontSize: normalize(24),
     fontWeight: 'bold',
-    color: 'black',
-    marginTop: normalize(20),
-    marginBottom: normalize(15),
+    color: '#3C3C3C', // Slate Gray for clarity
+    marginTop: normalize(30),
+    marginBottom: normalize(20),
     textAlign: 'left',
   },
   repeatDaysContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     marginBottom: normalize(30),
-    paddingHorizontal: normalize(20),
+    paddingHorizontal: normalize(16),
   },
   repeatDayButton: {
-    width: normalize(40),
-    height: normalize(40),
-    borderRadius: normalize(20),
+    width: normalize(44),
+    height: normalize(44),
+    borderRadius: normalize(22),
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    backgroundColor: '#fafafa',
+    borderColor: '#E0E0E0',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   repeatDayButtonSelected: {
-    backgroundColor: 'black',
-    borderColor: 'black',
+    backgroundColor: '#A7C7E7', // Soft Blue for selected state
+    borderColor: '#A7C7E7',
+    elevation: 2,
+    shadowColor: '#A7C7E7',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   repeatDayText: {
-    fontSize: normalize(12),
-    fontWeight: 'bold',
-    color: '#666',
+    fontSize: normalize(13),
+    fontWeight: '600',
+    color: '#666666',
   },
   repeatDayTextSelected: {
-    color: 'white',
+    color: '#FFFFFF', // White text on Soft Blue background
+    fontWeight: 'bold',
+  },
+  alertOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: normalize(20),
+  },
+  alertContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: normalize(320),
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+  },
+  alertHeader: {
+    padding: normalize(20),
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    alignItems: 'center',
+  },
+  alertTitle: {
+    fontSize: normalize(20),
+    fontWeight: 'bold',
+    color: '#3C3C3C', // Slate Gray
+  },
+  alertBody: {
+    padding: normalize(20),
+    paddingTop: normalize(16),
+  },
+  alertMessage: {
+    fontSize: normalize(16),
+    color: '#666666',
+    textAlign: 'center',
+    lineHeight: normalize(24),
+  },
+  alertButton: {
+    padding: normalize(16),
+    margin: normalize(20),
+    marginTop: normalize(8),
+    borderRadius: 12,
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  alertButtonText: {
+    color: '#3C3C3C', // Slate Gray for better contrast
+    fontSize: normalize(16),
+    fontWeight: 'bold',
   },
 });
 

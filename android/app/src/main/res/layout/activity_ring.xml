@@ -5,26 +5,26 @@
     android:orientation="vertical"
     android:gravity="center"
     android:padding="32dp"
-    android:background="#FF5722">
+    android:background="@drawable/alarm_dismissal_gradient">
 
     <TextView
         android:id="@+id/alarm_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Alarm"
-        android:textSize="32sp"
+        android:text="WAKE UP!"
+        android:textSize="48sp"
         android:textColor="#FFFFFF"
         android:textStyle="bold"
-        android:layout_marginBottom="64dp"
+        android:layout_marginBottom="40dp"
         android:gravity="center" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Time to wake up!"
-        android:textSize="18sp"
+        android:text="Time to start your day!"
+        android:textSize="28sp"
         android:textColor="#FFFFFF"
-        android:layout_marginBottom="64dp"
+        android:layout_marginBottom="60dp"
         android:gravity="center" />
 
     <Button
@@ -32,19 +32,19 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Dismiss (Solve Math)"
-        android:textSize="18sp"
-        android:padding="20dp"
-        android:layout_marginBottom="32dp"
+        android:textSize="24sp"
+        android:padding="24dp"
+        android:layout_marginBottom="40dp"
         android:background="@drawable/button_background"
-        android:textColor="#FFFFFF" />
+        android:textColor="#3C3C3C" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Solve a math problem to stop the alarm"
-        android:textSize="14sp"
+        android:text="Solve math to prove you're awake!"
+        android:textSize="20sp"
         android:textColor="#FFFFFF"
         android:gravity="center"
-        android:alpha="0.8" />
+        android:alpha="0.9" />
 
 </LinearLayout> 

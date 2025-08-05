@@ -27,13 +27,8 @@ public class RingActivity extends Activity {
         TextView titleText = findViewById(R.id.alarm_title);
         Button dismissButton = findViewById(R.id.dismiss_button);
         
-        // Get alarm title from intent
-        String title = getIntent().getStringExtra("TITLE");
-        if (title != null && !title.isEmpty()) {
-            titleText.setText(title);
-        } else {
-            titleText.setText("Alarm");
-        }
+        // Always show "WAKE UP!" instead of alarm title
+        titleText.setText("WAKE UP!");
         
         // Dismiss button - stops alarm and shows math problem
         dismissButton.setOnClickListener(new View.OnClickListener() {

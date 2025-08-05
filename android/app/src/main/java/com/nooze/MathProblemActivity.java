@@ -20,7 +20,6 @@ public class MathProblemActivity extends Activity {
     private TextView progressText;
     private EditText answerInput;
     private Button submitButton;
-    private Button nextButton;
     
     private int currentQuestion = 0;
     private int correctAnswers = 0;
@@ -52,7 +51,6 @@ public class MathProblemActivity extends Activity {
         progressText = findViewById(R.id.progress_text);
         answerInput = findViewById(R.id.answer_input);
         submitButton = findViewById(R.id.submit_button);
-        nextButton = findViewById(R.id.next_button);
         
         // Submit button - check answer
         submitButton.setOnClickListener(new View.OnClickListener() {
@@ -62,13 +60,7 @@ public class MathProblemActivity extends Activity {
             }
         });
         
-        // Next button - show next question
-        nextButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showNextQuestion();
-            }
-        });
+
         
         // Show keyboard when input is focused
         answerInput.setOnFocusChangeListener(new View.OnFocusChangeListener() {
@@ -113,16 +105,31 @@ public class MathProblemActivity extends Activity {
         // Show question
         questionText.setText(questions[questionIndex]);
         
+        // Change background based on question number
+        View mainLayout = findViewById(R.id.math_problem_layout);
+        switch (questionIndex) {
+            case 0:
+                mainLayout.setBackgroundResource(R.drawable.math_problem_bg_1);
+                break;
+            case 1:
+                mainLayout.setBackgroundResource(R.drawable.math_problem_bg_2);
+                break;
+            case 2:
+                mainLayout.setBackgroundResource(R.drawable.math_problem_bg_3);
+                break;
+            case 3:
+                mainLayout.setBackgroundResource(R.drawable.math_problem_bg_4);
+                break;
+        }
+        
         // Clear input
         answerInput.setText("");
         answerInput.setEnabled(true);
-        answerInput.requestFocus();
         
-        // Show submit button, hide next button
+        // Show submit button
         submitButton.setVisibility(View.VISIBLE);
-        nextButton.setVisibility(View.GONE);
         
-        Log.d(TAG, "Showing question " + (questionIndex + 1));
+        Log.d(TAG, "Showing question " + (questionIndex + 1) + " with background " + (questionIndex + 1));
     }
 
     private void checkAnswer() {
@@ -141,16 +148,9 @@ public class MathProblemActivity extends Activity {
                 correctAnswers++;
                 Log.d(TAG, "Correct answer! " + userAnswerInt + " = " + correctAnswer);
                 
-                // Disable input
-                answerInput.setEnabled(false);
-                
-                // Show success message
-                questionText.setText("✓ Correct! " + questions[currentQuestion] + " = " + correctAnswer);
-                
-                // Show next button or finish
+                // Go directly to next question or finish
                 if (currentQuestion < TOTAL_QUESTIONS - 1) {
-                    nextButton.setVisibility(View.VISIBLE);
-                    submitButton.setVisibility(View.GONE);
+                    showNextQuestion();
                 } else {
                     // All questions completed
                     finishMathProblems();
@@ -180,17 +180,49 @@ public class MathProblemActivity extends Activity {
             // Stop any remaining alarm service
             AlarmService.stopAlarm(this);
             
-            // Show completion message
-            questionText.setText("🎉 All correct! Alarm stopped.");
-            progressText.setText("You can now go back to sleep or start your day!");
+            // Hide keyboard first
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) {
+                imm.hideSoftInputFromWindow(answerInput.getWindowToken(), 0);
+            }
             
-            // Close activity after a short delay
+            // Show simplified completion message
+            questionText.setText("WAKE UP!\nDON'T FOOL\nYOURSELF.");
+            questionText.setTextSize(48);
+            questionText.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            questionText.setGravity(android.view.Gravity.CENTER);
+            questionText.setTextColor(android.graphics.Color.WHITE);
+            
+            // Hide all other UI elements
+            progressText.setVisibility(View.GONE);
+            answerInput.setVisibility(View.GONE);
+            submitButton.setVisibility(View.GONE);
+            
+            // Hide the title text and bottom text by finding them in the layout
+            View titleText = findViewById(android.R.id.text1); // This might not work, let's try a different approach
+            if (titleText != null) {
+                titleText.setVisibility(View.GONE);
+            }
+            
+            // Hide the bottom instruction text by finding the last TextView
+            View rootView = findViewById(R.id.math_problem_layout);
+            if (rootView instanceof android.view.ViewGroup) {
+                android.view.ViewGroup viewGroup = (android.view.ViewGroup) rootView;
+                for (int i = 0; i < viewGroup.getChildCount(); i++) {
+                    android.view.View child = viewGroup.getChildAt(i);
+                    if (child instanceof TextView && child != questionText && child != progressText) {
+                        child.setVisibility(View.GONE);
+                    }
+                }
+            }
+            
+            // Close activity after 5 seconds
             questionText.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     finish();
                 }
-            }, 2000);
+            }, 5000);
         } else {
             // Not all correct - restart
             Log.d(TAG, "Not all questions correct. Restarting...");
