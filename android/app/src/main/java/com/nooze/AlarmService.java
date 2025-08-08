@@ -72,7 +72,8 @@ public class AlarmService extends Service {
         // Create notification
         Notification notification = createNotification(title);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            // Align with manifest: mediaPlayback
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
@@ -80,13 +81,9 @@ public class AlarmService extends Service {
         // Start alarm sound and vibration
         startAlarm();
         
-        // Automatically launch RingActivity
-        Intent ringIntent = new Intent(this, RingActivity.class);
-        ringIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NO_USER_ACTION);
-        ringIntent.putExtra("TITLE", title);
-        Log.d(TAG, "Attempting to launch RingActivity with title: " + title);
-        startActivity(ringIntent);
-        Log.d(TAG, "RingActivity launch intent sent");
+        // Post full-screen notification which launches RingActivity over lock
+        NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        notificationManager.notify(NOTIFICATION_ID, notification);
         
         return START_NOT_STICKY;
     }
@@ -122,6 +119,8 @@ public class AlarmService extends Service {
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
+            // Full-screen intent to launch RingActivity even when device is locked (Android 10+)
+            .setFullScreenIntent(pendingIntent, true)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build();

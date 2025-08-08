@@ -2,13 +2,16 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
 
@@ -38,10 +41,11 @@
       <activity
         android:name=".RingActivity"
         android:label="Alarm"
-        android:theme="@style/AppTheme"
+         android:theme="@style/AppTheme"
         android:launchMode="singleInstance"
         android:showWhenLocked="true"
         android:turnScreenOn="true"
+         android:showOnLockScreen="true"
         android:excludeFromRecents="true"
         android:exported="false"
         android:taskAffinity=""
@@ -78,14 +82,14 @@
         android:name=".AlarmService"
         android:enabled="true"
         android:exported="false"
-        android:foregroundServiceType="specialUse" />
+        android:foregroundServiceType="mediaPlayback" />
         
       <!-- Reschedule Alarms Service -->
       <service
         android:name=".RescheduleAlarmsService"
         android:enabled="true"
         android:exported="false"
-        android:foregroundServiceType="specialUse" />
+        android:foregroundServiceType="dataSync" />
         
 
     </application>

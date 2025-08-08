@@ -12,6 +12,11 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReadableMap;
+import android.content.SharedPreferences;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 
 public class AlarmModule extends ReactContextBaseJavaModule {
     private static final String TAG = "AlarmModule";
@@ -23,6 +28,159 @@ public class AlarmModule extends ReactContextBaseJavaModule {
         this.reactContext = reactContext;
         this.alarmManager = (AlarmManager) reactContext.getSystemService(Context.ALARM_SERVICE);
         Log.d(TAG, "AlarmModule constructor called - Module initialized!");
+    }
+    @ReactMethod
+    public void canScheduleExactAlarms(Promise promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // API 31+
+                boolean allowed = alarmManager.canScheduleExactAlarms();
+                promise.resolve(allowed);
+            } else {
+                promise.resolve(true);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking canScheduleExactAlarms: " + e.getMessage());
+            promise.resolve(true);
+        }
+    }
+
+    @ReactMethod
+    public void openExactAlarmSettings(Promise promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Intent intent = new Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
+                intent.setData(android.net.Uri.parse("package:" + reactContext.getPackageName()));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                reactContext.startActivity(intent);
+                promise.resolve(true);
+            } else {
+                promise.resolve(true);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error opening exact alarm settings: " + e.getMessage());
+            promise.resolve(false);
+        }
+    }
+
+    @ReactMethod
+    public void openAppNotificationSettings(Promise promise) {
+        try {
+            Intent intent = new Intent();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                intent.setAction(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                intent.putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, reactContext.getPackageName());
+            } else {
+                intent.setAction(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                intent.setData(android.net.Uri.parse("package:" + reactContext.getPackageName()));
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            reactContext.startActivity(intent);
+            promise.resolve(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Error opening app notification settings: " + e.getMessage());
+            promise.resolve(false);
+        }
+    }
+
+    @ReactMethod
+    public void requestIgnoreBatteryOptimizations(Promise promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Intent intent = new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                intent.setData(android.net.Uri.parse("package:" + reactContext.getPackageName()));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                reactContext.startActivity(intent);
+            }
+            promise.resolve(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Error requesting ignore battery optimizations: " + e.getMessage());
+            promise.resolve(false);
+        }
+    }
+
+    @ReactMethod
+    public void createAlarmChannel(Promise promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationManager nm = (NotificationManager) reactContext.getSystemService(Context.NOTIFICATION_SERVICE);
+                NotificationChannel channel = new NotificationChannel(
+                        "AlarmChannel",
+                        "Alarm Notifications",
+                        NotificationManager.IMPORTANCE_HIGH
+                );
+                channel.setDescription("Channel for alarm notifications");
+                channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
+                channel.enableVibration(true);
+                channel.enableLights(true);
+                nm.createNotificationChannel(channel);
+            }
+            promise.resolve(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Error creating alarm channel: " + e.getMessage());
+            promise.resolve(false);
+        }
+    }
+
+    @ReactMethod
+    public void postTestNotification(Promise promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Ensure channel exists
+                NotificationManager nm = (NotificationManager) reactContext.getSystemService(Context.NOTIFICATION_SERVICE);
+                NotificationChannel channel = new NotificationChannel(
+                        "AlarmChannel",
+                        "Alarm Notifications",
+                        NotificationManager.IMPORTANCE_HIGH
+                );
+                channel.setDescription("Channel for alarm notifications");
+                channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
+                nm.createNotificationChannel(channel);
+            }
+            NotificationManager nm = (NotificationManager) reactContext.getSystemService(Context.NOTIFICATION_SERVICE);
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(reactContext, "AlarmChannel")
+                    .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                    .setContentTitle("Nooze notifications")
+                    .setContentText("Tap to configure notifications")
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                    .setAutoCancel(true);
+            nm.notify(42, builder.build());
+            promise.resolve(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Error posting test notification: " + e.getMessage());
+            promise.resolve(false);
+        }
+    }
+
+    @ReactMethod
+    public void areNotificationsEnabled(Promise promise) {
+        try {
+            boolean enabled = NotificationManagerCompat.from(reactContext).areNotificationsEnabled();
+            promise.resolve(enabled);
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking notifications enabled: " + e.getMessage());
+            promise.resolve(false);
+        }
+    }
+
+    @ReactMethod
+    public void openChannelNotificationSettings(String channelId, Promise promise) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent intent = new Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS);
+                intent.putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, reactContext.getPackageName());
+                intent.putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, channelId);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                reactContext.startActivity(intent);
+                promise.resolve(true);
+            } else {
+                // Fallback to app notification settings
+                openAppNotificationSettings(promise);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error opening channel notification settings: " + e.getMessage());
+            promise.resolve(false);
+        }
     }
 
     @Override
@@ -144,6 +302,9 @@ public class AlarmModule extends ReactContextBaseJavaModule {
         try {
             long triggerTime = (long) alarmData.getDouble("triggerTime");
             int alarmId = alarmData.getInt("alarmId");
+            // Optional: persist daily time for reschedule
+            int hourOfDay = alarmData.hasKey("hourOfDay") ? alarmData.getInt("hourOfDay") : -1;
+            int minuteOfHour = alarmData.hasKey("minuteOfHour") ? alarmData.getInt("minuteOfHour") : -1;
             Log.d(TAG, "Parsed triggerTime: " + triggerTime + ", alarmId: " + alarmId);
             
             Intent intent = new Intent(reactContext, AlarmBroadcastReceiver.class);
@@ -197,6 +358,14 @@ public class AlarmModule extends ReactContextBaseJavaModule {
             }
             
             Log.d(TAG, "Alarm scheduled for: " + triggerTime + " (ID: " + alarmId + ")");
+            // Persist latest alarm metadata for boot/reschedule
+            SharedPreferences prefs = reactContext.getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
+            prefs.edit()
+                .putInt("lastAlarmId", alarmId)
+                .putLong("lastTriggerTime", triggerTime)
+                .putInt("dailyWakeHour", hourOfDay)
+                .putInt("dailyWakeMinute", minuteOfHour)
+                .apply();
             promise.resolve(true);
             
         } catch (Exception e) {
@@ -228,6 +397,85 @@ public class AlarmModule extends ReactContextBaseJavaModule {
             
         } catch (Exception e) {
             Log.e(TAG, "Error cancelling alarm: " + e.getMessage());
+            promise.reject("ALARM_ERROR", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void scheduleOneOffTestAlarm(ReadableMap alarmData, Promise promise) {
+        Log.d(TAG, "scheduleOneOffTestAlarm called with data: " + alarmData.toString());
+        try {
+            long triggerTime = (long) alarmData.getDouble("triggerTime");
+            int alarmId = alarmData.hasKey("alarmId") ? alarmData.getInt("alarmId") : 9999;
+
+            Intent intent = new Intent(reactContext, AlarmBroadcastReceiver.class);
+            intent.putExtra("ALARM_ID", alarmId);
+            intent.putExtra("TITLE", "Test Alarm");
+            intent.putExtra("RECURRING", false);
+
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+
+            PendingIntent pendingIntent = PendingIntent.getBroadcast(
+                reactContext,
+                alarmId,
+                intent,
+                flags
+            );
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                );
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                alarmManager.setAlarmClock(
+                    new AlarmManager.AlarmClockInfo(triggerTime, pendingIntent),
+                    pendingIntent
+                );
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                );
+            }
+
+            Log.d(TAG, "One-off test alarm scheduled for: " + triggerTime + " (ID: " + alarmId + ")");
+            promise.resolve(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Error scheduling one-off test alarm: " + e.getMessage());
+            promise.reject("ALARM_ERROR", e.getMessage());
+        }
+    }
+    @ReactMethod
+    public void clearAllAlarms(Promise promise) {
+        try {
+            SharedPreferences prefs = reactContext.getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
+            int lastId = prefs.getInt("lastAlarmId", -1);
+            if (lastId != -1) {
+                Intent intent = new Intent(reactContext, AlarmBroadcastReceiver.class);
+                PendingIntent pendingIntent = PendingIntent.getBroadcast(
+                    reactContext,
+                    lastId,
+                    intent,
+                    PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE
+                );
+                if (pendingIntent != null) {
+                    alarmManager.cancel(pendingIntent);
+                    pendingIntent.cancel();
+                    Log.d(TAG, "Cleared last scheduled alarm: " + lastId);
+                }
+            }
+            // Also stop any running alarm service and reset flags
+            try {
+                Intent serviceIntent = new Intent(reactContext, AlarmService.class);
+                reactContext.stopService(serviceIntent);
+            } catch (Exception ignored) {}
+            prefs.edit().putBoolean("isAlarmActive", false).apply();
+            promise.resolve(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Error clearing alarms: " + e.getMessage());
             promise.reject("ALARM_ERROR", e.getMessage());
         }
     }

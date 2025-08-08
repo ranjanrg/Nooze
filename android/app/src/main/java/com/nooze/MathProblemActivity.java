@@ -179,6 +179,39 @@ public class MathProblemActivity extends Activity {
             
             // Stop any remaining alarm service
             AlarmService.stopAlarm(this);
+
+            // Schedule next day's alarm immediately using stored hour/minute
+            try {
+                android.content.SharedPreferences prefs = getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
+                int hour = prefs.getInt("dailyWakeHour", -1);
+                int minute = prefs.getInt("dailyWakeMinute", -1);
+                if (hour >= 0 && minute >= 0) {
+                    java.util.Calendar cal = java.util.Calendar.getInstance();
+                    cal.set(java.util.Calendar.HOUR_OF_DAY, hour);
+                    cal.set(java.util.Calendar.MINUTE, minute);
+                    cal.set(java.util.Calendar.SECOND, 0);
+                    cal.set(java.util.Calendar.MILLISECOND, 0);
+                    if (cal.getTimeInMillis() <= System.currentTimeMillis()) {
+                        cal.add(java.util.Calendar.DAY_OF_YEAR, 1);
+                    }
+                    long triggerTime = cal.getTimeInMillis();
+                    android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
+                    android.content.Intent intent = new android.content.Intent(this, AlarmBroadcastReceiver.class);
+                    int alarmId = prefs.getInt("lastAlarmId", 1001);
+                    android.app.PendingIntent pi = android.app.PendingIntent.getBroadcast(this, alarmId, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerTime, pi);
+                    } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                        am.setAlarmClock(new android.app.AlarmManager.AlarmClockInfo(triggerTime, pi), pi);
+                    } else {
+                        am.setExact(android.app.AlarmManager.RTC_WAKEUP, triggerTime, pi);
+                    }
+                    // Persist last trigger
+                    prefs.edit().putLong("lastTriggerTime", triggerTime).apply();
+                }
+            } catch (Exception e) {
+                android.util.Log.e(TAG, "Failed to schedule next day alarm: " + e.getMessage());
+            }
             
             // Hide keyboard first
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);

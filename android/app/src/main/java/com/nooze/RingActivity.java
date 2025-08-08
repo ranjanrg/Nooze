@@ -17,6 +17,17 @@ public class RingActivity extends Activity {
         super.onCreate(savedInstanceState);
         Log.d(TAG, "RingActivity onCreate called");
         setContentView(R.layout.activity_ring);
+        // Ensure screen turns on and shows over lock for older APIs
+        getWindow().addFlags(
+            android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+            android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
+            android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        );
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            setTurnScreenOn(true);
+            setShowWhenLocked(true);
+        }
         
         // Set up UI
         setupUI();

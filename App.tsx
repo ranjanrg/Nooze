@@ -5,1262 +5,520 @@
  * @format
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
-  TouchableOpacity,
-  TextInput,
-  Alert,
-  Platform,
-  NativeModules,
-  AppState,
-  ScrollView,
-  Linking,
-  BackHandler,
-  StatusBar,
-  Dimensions,
-  Modal,
-} from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import KeepAwake from 'react-native-keep-awake';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-
+import React, { useState, useEffect, useMemo } from 'react';
+import { Alert, PermissionsAndroid, Platform } from 'react-native';
+import { NativeModules } from 'react-native';
+import { HomeScreen } from './src/components/HomeScreen';
+import { OnboardingScreen } from './src/components/OnboardingScreen';
+import { SettingsScreen } from './src/components/SettingsScreen';
+import { ChallengesScreen } from './src/components/ChallengesScreen';
+import { NameInputScreen } from './src/components/NameInputScreen';
+import { TimeSelectionScreen } from './src/components/TimeSelectionScreen';
+import { ConfirmationScreen } from './src/components/ConfirmationScreen';
+import { useAlarms } from './src/hooks/useAlarms';
+import { useChallenge } from './src/hooks/useChallenge';
+import { ScreenType, OnboardingData } from './src/types';
 
 const { AlarmModule } = NativeModules;
 
-// Responsive design utilities
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-const scale = screenWidth / 375; // Base width for iPhone X
-
-const normalize = (size: number) => {
-  return Math.round(size * scale);
-};
-
-// Responsive breakpoints
-const isSmallDevice = screenWidth < 360;
-const isMediumDevice = screenWidth >= 360 && screenWidth < 400;
-const isLargeDevice = screenWidth >= 400;
-
-interface Alarm {
-  id: number;
-  time: Date;
-  isActive: boolean;
-  repeatDays: number[]; // 0=Sunday, 1=Monday, etc.
-}
-
-interface MathProblem {
-  num1: number;
-  num2: number;
-  operator: string;
-  answer: number;
-}
-
-function App() {
-  // Configure status bar for visibility
-  useEffect(() => {
-    StatusBar.setBarStyle('dark-content');
-    if (Platform.OS === 'android') {
-      StatusBar.setBackgroundColor('white');
-      StatusBar.setTranslucent(false);
-    }
-  }, []);
-
-  const [alarms, setAlarms] = useState<Alarm[]>([]);
-  const [selectedTime, setSelectedTime] = useState(new Date());
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [isAlarmActive, setIsAlarmActive] = useState(false);
-  const [mathProblem, setMathProblem] = useState<MathProblem | null>(null);
-  const [userAnswer, setUserAnswer] = useState('');
-  const [nextAlarmId, setNextAlarmId] = useState(1);
-  const [isAlarmLaunch, setIsAlarmLaunch] = useState(false);
-  const [showPermissionPrompt, setShowPermissionPrompt] = useState(false);
-  const [currentScreen, setCurrentScreen] = useState<'home' | 'setAlarm'>('home');
-  const [selectedRepeatDays, setSelectedRepeatDays] = useState<number[]>([1, 2, 3, 4, 5]); // Monday to Friday
-  const [currentAlarmId, setCurrentAlarmId] = useState<number | null>(null);
-  const [customAlert, setCustomAlert] = useState<{ visible: boolean; title: string; message: string; type: 'success' | 'error' }>({
-    visible: false,
-    title: '',
-    message: '',
-    type: 'success'
-  });
+export default function App() {
+  // Screen navigation
+  const [currentScreen, setCurrentScreen] = useState<ScreenType>('home');
   
-  // Use refs to track state to avoid race conditions and stale closures
-  const isAlarmActiveRef = useRef(false);
-  const alarmsRef = useRef<Alarm[]>([]);
-  const lastSolvedTimeRef = useRef<number>(0);
+  // Onboarding state
+  const [selectedMotivation, setSelectedMotivation] = useState<string>('');
+  const [selectedMorningActivity, setSelectedMorningActivity] = useState<string>('');
+  const [selectedPastExperience, setSelectedPastExperience] = useState<string>('');
+  const [selectedObstacle, setSelectedObstacle] = useState<string>('');
+  const [selectedRoutineRating, setSelectedRoutineRating] = useState<string>('');
+  const [selectedTime, setSelectedTime] = useState<string>('');
+  const [repeatDays, setRepeatDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
+  const [selectedChallenge, setSelectedChallenge] = useState<string>('');
+  const [userName, setUserName] = useState<string>('');
+  const [isEditingTime, setIsEditingTime] = useState<boolean>(false);
+  const { alarms, addAlarm, removeAlarm, clearAllAlarms } = useAlarms();
+  const { currentChallenge, startChallenge, calculateProgressPercentage, markDay, dayStatus, completedDaysFromLogs } = useChallenge();
 
-  // Load saved alarms when app starts
+  // Check permissions on app start
   useEffect(() => {
-    const loadSavedAlarms = async () => {
-      const savedAlarms = await loadAlarmsFromStorage();
-      if (savedAlarms.length > 0) {
-        setAlarms(savedAlarms);
-        alarmsRef.current = savedAlarms; // Update ref
-        // Set nextAlarmId to be higher than the highest existing alarm ID
-        const maxId = Math.max(...savedAlarms.map(alarm => alarm.id));
-        setNextAlarmId(maxId + 1);
-        console.log('Loaded', savedAlarms.length, 'alarms from storage');
-      }
-    };
-    
-    loadSavedAlarms();
+    // Ensure notification channel exists before requesting permissions
+    try { AlarmModule.createAlarmChannel(); } catch {}
+    checkPermissions();
   }, []);
 
-
-
-  // Check if app was launched from alarm (only on initial load)
-  useEffect(() => {
-    const checkAlarmLaunch = async () => {
-             try {
-         const isAlarmLaunch = await AlarmModule.checkIfAlarmLaunch();
-         
-         // Add cooldown check to prevent re-triggering after solving
-         const timeSinceLastSolved = Date.now() - lastSolvedTimeRef.current;
-         const isInCooldown = timeSinceLastSolved < 5000; // 5 second cooldown
-         
-         if (isAlarmLaunch && !isAlarmActive && !isInCooldown) {
-          console.log('App launched from alarm!');
-          setIsAlarmLaunch(true);
-          setIsAlarmActive(true);
-          isAlarmActiveRef.current = true;
-          setMathProblem(generateMathProblem());
-          
-                     // Find the alarm that was triggered (the one that's due now)
-           const now = new Date();
-           const triggeredAlarm = alarmsRef.current.find(alarm => {
-             const alarmTime = new Date(alarm.time);
-             const timeDiff = Math.abs(alarmTime.getTime() - now.getTime());
-             return timeDiff < 60000; // Within 1 minute
-           });
-          
-          if (triggeredAlarm) {
-            setCurrentAlarmId(triggeredAlarm.id);
-            console.log('Current alarm ID set to:', triggeredAlarm.id);
+  const checkPermissions = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        // Android 13+ notification permission (optional for now)
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+          {
+            title: 'Notification Permission',
+            message: 'Nooze needs permission to send notifications',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
           }
+        );
+        
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+          console.log('Notification permission granted');
+        } else {
+          console.log('Notification permission denied');
+          // Guide user to system settings when permission is denied or blocked
+          Alert.alert(
+            'Allow notifications',
+            'To reliably show the alarm and math screen, enable notifications for Nooze in system settings.',
+            [
+              { text: 'Later', style: 'cancel' },
+              { text: 'Open settings', onPress: async () => { try { await AlarmModule.openAppNotificationSettings(); } catch {} } },
+            ]
+          );
         }
-      } catch (error) {
-        console.log('Error checking alarm launch:', error);
-      }
-    };
-    
-    checkAlarmLaunch();
-  }, []); // Only run on initial load, not when alarms or isAlarmActive changes
 
-  // Listen for app state changes to detect when app comes to foreground
-  useEffect(() => {
-         const handleAppStateChange = async (nextAppState: string) => {
-       if (nextAppState === 'active') {
-         console.log('🔄 App state changed to active');
-         
-         // Check for alarm launch regardless of current state
-         try {
-           const isAlarmLaunch = await AlarmModule.checkIfAlarmLaunch();
-           console.log('🔍 checkIfAlarmLaunch result:', isAlarmLaunch);
-           
-           // Add cooldown check to prevent re-triggering after solving
-           const timeSinceLastSolved = Date.now() - lastSolvedTimeRef.current;
-           const isInCooldown = timeSinceLastSolved < 5000; // 5 second cooldown
-           console.log('⏰ Time since last solved:', timeSinceLastSolved, 'ms, In cooldown:', isInCooldown);
-           
-           if (isAlarmLaunch && !isAlarmActiveRef.current && !isInCooldown) {
-            console.log('🚨 App activated from alarm! Starting math problem...');
-            setIsAlarmLaunch(true);
-            setIsAlarmActive(true);
-            isAlarmActiveRef.current = true;
-            setMathProblem(generateMathProblem());
-            
-            // Find the alarm that was triggered
-            const now = new Date();
-            const triggeredAlarm = alarmsRef.current.find(alarm => {
-              const alarmTime = new Date(alarm.time);
-              const timeDiff = Math.abs(alarmTime.getTime() - now.getTime());
-              return timeDiff < 60000; // Within 1 minute
-            });
-            
-            if (triggeredAlarm) {
-              setCurrentAlarmId(triggeredAlarm.id);
-              console.log('📅 Current alarm ID set to:', triggeredAlarm.id);
-            }
-          } else {
-            console.log('❌ Not starting alarm - isAlarmLaunch:', isAlarmLaunch, 'isAlarmActiveRef:', isAlarmActiveRef.current, 'isInCooldown:', isInCooldown);
+        // Android 12+ Exact Alarms capability prompt
+        try {
+          const canExact = await AlarmModule.canScheduleExactAlarms();
+          if (!canExact) {
+            Alert.alert(
+              'Allow exact alarms',
+              'To ring at the exact minute, please allow exact alarms for Nooze.',
+              [
+                { text: 'Not now', style: 'cancel' },
+                { text: 'Open settings', onPress: async () => { try { await AlarmModule.openExactAlarmSettings(); } catch {} } },
+              ]
+            );
           }
-        } catch (error) {
-          console.log('❌ Error checking alarm launch:', error);
+        } catch (e) {
+          console.warn('Exact alarm capability check failed', e);
         }
+
+        // Post a test notification to surface channel in settings UIs
+        try { await AlarmModule.postTestNotification(); } catch {}
+      } catch (err) {
+        console.warn(err);
       }
+    }
+  };
+
+  // Navigation handlers
+  const navigateToScreen = (screen: ScreenType) => {
+    setCurrentScreen(screen);
+  };
+
+  const goBack = () => {
+    const screenFlow: Record<ScreenType, ScreenType> = {
+      question: 'nameInput',
+      morningActivities: 'question',
+      pastExperience: 'morningActivities',
+      obstacles: 'pastExperience',
+      routineRating: 'obstacles',
+      timeSelection: 'routineRating',
+      confirmation: 'timeSelection',
+      home: 'home',
+      setAlarm: 'home',
+      settings: 'home',
+      challenges: 'home',
+      nameInput: 'challenges',
+    };
+    setCurrentScreen(screenFlow[currentScreen]);
+  };
+
+  const handleNext = () => {
+    const screenFlow: Record<ScreenType, ScreenType> = {
+      question: 'morningActivities',
+      morningActivities: 'pastExperience',
+      pastExperience: 'obstacles',
+      obstacles: 'routineRating',
+      routineRating: 'timeSelection',
+      timeSelection: 'confirmation',
+      confirmation: 'home',
+      home: 'home',
+      setAlarm: 'home',
+      settings: 'home',
+      challenges: 'home',
+      nameInput: 'question',
+    };
+    setCurrentScreen(screenFlow[currentScreen]);
+  };
+
+  // Onboarding handlers
+  const handleOptionSelect = (option: string) => {
+    switch (currentScreen) {
+      case 'question':
+        setSelectedMotivation(option);
+        break;
+      case 'morningActivities':
+        setSelectedMorningActivity(option);
+        break;
+      case 'pastExperience':
+        setSelectedPastExperience(option);
+        break;
+      case 'obstacles':
+        setSelectedObstacle(option);
+        break;
+      case 'routineRating':
+        setSelectedRoutineRating(option);
+        break;
+    }
+  };
+
+  // Challenge handlers
+  const handleChallengeSelect = (challengeType: string) => {
+    setSelectedChallenge(challengeType);
+    setCurrentScreen('nameInput');
+  };
+
+  const handleNameSubmit = (name: string) => {
+    setUserName(name);
+    // Go to the first onboarding question after name input
+    setCurrentScreen('question');
+  };
+
+  // Onboarding helper to prompt all critical permissions/special access
+  const promptCriticalAccess = async () => {
+    try {
+      // 1) Notifications settings (ensures high-importance channel visible)
+      try { await AlarmModule.openAppNotificationSettings(); } catch {}
+      // 2) Exact alarms (Android 12+)
+      try {
+        const canExact = await AlarmModule.canScheduleExactAlarms();
+        if (!canExact) { await AlarmModule.openExactAlarmSettings(); }
+      } catch {}
+      // 3) Battery optimization exclusion (optional)
+      try { await AlarmModule.requestIgnoreBatteryOptimizations(); } catch {}
+    } catch (e) {
+      console.warn('Permission prompts failed', e);
+    }
+  };
+
+  const handleStartChallenge = async () => {
+    const onboardingData: OnboardingData = {
+      motivation: selectedMotivation,
+      morningActivity: selectedMorningActivity,
+      pastExperience: selectedPastExperience,
+      obstacle: selectedObstacle,
+      routineRating: selectedRoutineRating,
     };
 
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
-  }, []); // Remove dependencies to prevent re-creation
+    const challenge = await startChallenge(onboardingData);
+    if (challenge) {
+      setCurrentScreen('home');
+    }
+  };
 
-
-
-  useEffect(() => {
-    if (isAlarmActive) {
-      KeepAwake.activate();
+  const handleTimeSelected = async (time: string) => {
+    setSelectedTime(time);
+    if (isEditingTime) {
+      // Parse and schedule immediately, then go back home
+      const [timeStr, period] = time.split(' ');
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      let hour = hours;
+      if (period === 'PM' && hours !== 12) {
+        hour += 12;
+      } else if (period === 'AM' && hours === 12) {
+        hour = 0;
+      }
+      const wakeUpTime = new Date();
+      wakeUpTime.setHours(hour, minutes, 0, 0);
+      await scheduleAlarm(wakeUpTime, repeatDays, {
+        challenge: selectedChallenge,
+        userName: userName,
+        motivation: selectedMotivation,
+        morningActivity: selectedMorningActivity,
+        pastExperience: selectedPastExperience,
+        obstacle: selectedObstacle,
+        routineRating: selectedRoutineRating,
+      });
+      setIsEditingTime(false);
+      setCurrentScreen('home');
     } else {
-      KeepAwake.deactivate();
+      setCurrentScreen('confirmation');
     }
-  }, [isAlarmActive]);
+  };
 
-  // Prevent back button when alarm is active
-  useEffect(() => {
-    const backAction = () => {
-      if (isAlarmActive) {
-        // Prevent back button from working during alarm
-        return true;
-      }
-      return false;
+  const handleConfirm = async () => {
+    // Parse the time string (e.g., "6:00 AM") to a Date object
+    const [timeStr, period] = selectedTime.split(' ');
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    
+    let hour = hours;
+    if (period === 'PM' && hours !== 12) {
+      hour += 12;
+    } else if (period === 'AM' && hours === 12) {
+      hour = 0;
+    }
+    
+    const wakeUpTime = new Date();
+    wakeUpTime.setHours(hour, minutes, 0, 0);
+    
+    // Schedule the alarm with the selected time
+    await scheduleAlarm(wakeUpTime, repeatDays, {
+      challenge: selectedChallenge,
+      userName: userName,
+      motivation: selectedMotivation,
+      morningActivity: selectedMorningActivity,
+      pastExperience: selectedPastExperience,
+      obstacle: selectedObstacle,
+      routineRating: selectedRoutineRating,
+    });
+    
+    // Start the challenge
+    const onboardingData: OnboardingData = {
+      motivation: selectedMotivation,
+      morningActivity: selectedMorningActivity,
+      pastExperience: selectedPastExperience,
+      obstacle: selectedObstacle,
+      routineRating: selectedRoutineRating,
     };
 
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
-
-    return () => backHandler.remove();
-  }, [isAlarmActive]);
-
-  const generateMathProblem = (): MathProblem => {
-    const num1 = Math.floor(Math.random() * 90) + 10; // 10-99
-    const num2 = Math.floor(Math.random() * 90) + 10; // 10-99
-    const operators = ['+', '-', '*'];
-    const operator = operators[Math.floor(Math.random() * operators.length)];
-    
-    let answer: number;
-    switch (operator) {
-      case '+':
-        answer = num1 + num2;
-        break;
-      case '-':
-        answer = num1 - num2;
-        break;
-      case '*':
-        answer = num1 * num2;
-        break;
-      default:
-        answer = num1 + num2;
+    const challenge = await startChallenge(onboardingData);
+    if (challenge) {
+      setCurrentScreen('home');
     }
-    
-    return { num1, num2, operator, answer };
   };
 
-  // Helper functions for persistent storage
-  const saveAlarmsToStorage = async (alarmsToSave: Alarm[]) => {
+  // Edit time flow from Home: open time selection, then confirm new time for future
+  const handleEditTime = () => {
+    setIsEditingTime(true);
+    setCurrentScreen('timeSelection');
+  };
+
+  // Skip today: adjust progress and optionally mark missed
+  const handleSkipToday = () => {
+    // Mark today as missed in logs; progress will reflect via completedDaysFromLogs
     try {
-      const alarmsData = alarmsToSave.map(alarm => ({
-        ...alarm,
-        time: alarm.time.toISOString(), // Convert Date to string for storage
-      }));
-      await AsyncStorage.setItem('nooze_alarms', JSON.stringify(alarmsData));
-      console.log('Alarms saved to storage:', alarmsToSave.length);
-      
-      // Also save in a format that BootReceiver can read (SharedPreferences)
-      const bootAlarmsData = alarmsToSave.map(alarm => ({
-        id: alarm.id,
-        triggerTime: alarm.time.getTime(), // Store as timestamp for native code
-        isActive: alarm.isActive,
-        repeatDays: alarm.repeatDays
-      }));
-      
-      // Save to SharedPreferences for boot restoration
-      const { AlarmModule } = NativeModules;
-      if (AlarmModule.saveAlarmsForBoot) {
-        await AlarmModule.saveAlarmsForBoot(JSON.stringify(bootAlarmsData));
-      }
-    } catch (error) {
-      console.error('Error saving alarms to storage:', error);
+      markDay(new Date(), 'missed');
+    } catch (e) {
+      console.warn('Failed to mark day missed', e);
     }
   };
 
-  const loadAlarmsFromStorage = async (): Promise<Alarm[]> => {
+  // Alarm handlers
+  const scheduleAlarm = async (time: Date, repeatDaysOverride?: number[], challengeData?: any) => {
     try {
-      const alarmsData = await AsyncStorage.getItem('nooze_alarms');
-      if (alarmsData) {
-        const parsedAlarms = JSON.parse(alarmsData).map((alarm: any) => ({
-          ...alarm,
-          time: new Date(alarm.time), // Convert string back to Date
-        }));
-        console.log('Alarms loaded from storage:', parsedAlarms.length);
-        return parsedAlarms;
-      }
-      return [];
-    } catch (error) {
-      console.error('Error loading alarms from storage:', error);
-      return [];
-    }
-  };
-
-  // Helper function to calculate next valid alarm time based on repeat days
-  const calculateNextAlarmTime = (selectedTime: Date, repeatDays: number[]): Date => {
-    const now = new Date();
-    const alarmTime = new Date(selectedTime);
-    
-    // Get current day of week (0 = Sunday, 1 = Monday, etc.)
-    const currentDay = now.getDay();
-    
-    // If no repeat days selected, just set for next occurrence
-    if (repeatDays.length === 0) {
-      if (alarmTime <= now) {
+      const alarmTime = new Date(time);
+      const now = new Date();
+      
+      // If the time is earlier today, schedule for tomorrow
+      if (alarmTime.getTime() <= now.getTime()) {
         alarmTime.setDate(alarmTime.getDate() + 1);
       }
-      return alarmTime;
-    }
-    
-    // Check if today is a selected repeat day
-    const isTodaySelected = repeatDays.includes(currentDay);
-    
-    if (isTodaySelected) {
-      // If today is selected and time hasn't passed, set for today
-      if (alarmTime > now) {
-        return alarmTime;
-      }
-    }
-    
-    // Find the next selected day
-    let daysToAdd = 1;
-    let nextDay = (currentDay + daysToAdd) % 7;
-    
-    // Look for the next selected day within the next 7 days
-    while (daysToAdd <= 7) {
-      if (repeatDays.includes(nextDay)) {
-        break;
-      }
-      daysToAdd++;
-      nextDay = (currentDay + daysToAdd) % 7;
-    }
-    
-    // Set the alarm for the next selected day
-    const nextAlarmTime = new Date(selectedTime);
-    nextAlarmTime.setDate(nextAlarmTime.getDate() + daysToAdd);
-    
-    return nextAlarmTime;
-  };
 
-  const scheduleAlarm = async (time: Date) => {
-    console.log('scheduleAlarm called with time:', time.toLocaleString());
-    console.log('Selected repeat days:', selectedRepeatDays);
-    
-    // Check if we have the required permission
-    const hasPermission = await AlarmModule.checkDisplayOverAppsPermission();
-    if (!hasPermission) {
-      setShowPermissionPrompt(true);
-      return;
-    }
-    
-    // Calculate the next valid alarm time based on repeat days
-    const nextAlarmTime = calculateNextAlarmTime(time, selectedRepeatDays);
-    
-    console.log('Current time:', new Date().toLocaleString());
-    console.log('Original selected time:', time.toLocaleString());
-    console.log('Calculated next alarm time:', nextAlarmTime.toLocaleString());
-    
-    const triggerTime = nextAlarmTime.getTime();
-    const alarmId = nextAlarmId;
-    
-    console.log('About to call AlarmModule.scheduleAlarm with:', { alarmId, triggerTime });
-    
-    try {
-      console.log('Calling AlarmModule.scheduleAlarm...');
-      const result = await AlarmModule.scheduleAlarm({ alarmId, triggerTime });
-      console.log('AlarmModule.scheduleAlarm result:', result);
+      const alarmData = {
+        triggerTime: alarmTime.getTime(),
+        alarmId: 1001,
+        hourOfDay: alarmTime.getHours(),
+        minuteOfHour: alarmTime.getMinutes(),
+      };
+
+      // Prevent duplicate notifications: clear any existing alarms first
+      try {
+        await AlarmModule.clearAllAlarms();
+      } catch (e) {
+        // ignore if not implemented on platform
+      }
+      try {
+        await clearAllAlarms();
+      } catch (e) {
+        // ignore storage clear errors
+      }
+
+      await AlarmModule.scheduleAlarm(alarmData);
       
-      if (result) {
-        const newAlarm: Alarm = {
-          id: alarmId,
-          time: nextAlarmTime,
-          isActive: true,
-          repeatDays: selectedRepeatDays,
-        };
-        
-        const updatedAlarms = [...alarms, newAlarm];
-        setAlarms(updatedAlarms);
-        alarmsRef.current = updatedAlarms; // Update ref
-        setNextAlarmId(prev => prev + 1);
-        
-        // Save alarms to persistent storage
-        await saveAlarmsToStorage(updatedAlarms);
-        
-        setCurrentScreen('home'); // Navigate back to home screen
-        
-        // Show informative message about when alarm will ring
-        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const nextDayName = dayNames[nextAlarmTime.getDay()];
-        showCustomAlert('Success', `Alarm set for ${nextDayName} at ${nextAlarmTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}!`, 'success');
-      } else {
-        showCustomAlert('Error', 'Failed to set alarm', 'error');
+      // Add to local storage
+      const newAlarm = await addAlarm({
+        time: alarmTime,
+        repeatDays: repeatDaysOverride || repeatDays,
+        isActive: true,
+      });
+
+      if (newAlarm) {
+        Alert.alert('Success', 'Alarm scheduled successfully!');
       }
     } catch (error) {
       console.error('Error scheduling alarm:', error);
-      showCustomAlert('Error', 'Failed to set alarm', 'error');
+      Alert.alert('Error', 'Failed to schedule alarm');
     }
   };
 
-  const cancelAlarm = async (alarmId: number) => {
+  const handleSetAlarm = async () => {
+    await scheduleAlarm(new Date());
+    setCurrentScreen('home');
+  };
+
+  const handleClearAllAlarms = async () => {
     try {
-      await AlarmModule.cancelAlarm(alarmId);
-              const updatedAlarms = alarms.filter(alarm => alarm.id !== alarmId);
-        setAlarms(updatedAlarms);
-        alarmsRef.current = updatedAlarms; // Update ref
+      // Clear native alarms
+      await AlarmModule.clearAllAlarms();
       
-      // Save updated alarms to persistent storage
-      await saveAlarmsToStorage(updatedAlarms);
+      // Clear local alarms
+      await clearAllAlarms();
       
-      showCustomAlert('Success', 'Alarm cancelled', 'success');
+      Alert.alert('Success', 'All alarms cleared');
     } catch (error) {
-      console.error('Error cancelling alarm:', error);
-      showCustomAlert('Error', 'Failed to cancel alarm', 'error');
+      console.error('Error clearing alarms:', error);
+      Alert.alert('Error', 'Failed to clear alarms');
     }
   };
 
-  const checkMathAnswer = async () => {
-    if (!mathProblem) return;
-    
-    const userAnswerNum = parseInt(userAnswer);
-    if (userAnswerNum === mathProblem.answer) {
-      console.log('✅ Correct answer! Stopping alarm...');
-      
-      // Stop the alarm sound FIRST
-      try {
-        await AlarmModule.stopAlarmSound();
-        console.log('✅ Alarm sound stopped');
-      } catch (error) {
-        console.log('❌ Error stopping alarm sound:', error);
-      }
-      
-      // Clear the shared preference flag IMMEDIATELY to prevent re-triggering
-      try {
-        await AlarmModule.clearAlarmActiveFlag();
-        console.log('✅ Cleared alarm active flag from shared preferences');
-        
-        // Verify the flag is cleared
-        const isStillActive = await AlarmModule.isAlarmStillActive();
-        console.log('🔍 Verification - isAlarmStillActive:', isStillActive);
-        
-        // Add a small delay to ensure flag is cleared before state changes
-        await new Promise(resolve => setTimeout(resolve, 200));
-      } catch (error) {
-        console.log('❌ Error clearing alarm flag:', error);
-      }
-      
-      // Reset alarm state
-      console.log('🔄 Resetting alarm state...');
-      setIsAlarmActive(false);
-      isAlarmActiveRef.current = false;
-      lastSolvedTimeRef.current = Date.now(); // Set cooldown timestamp
-      setMathProblem(null);
-      setUserAnswer('');
-      setCurrentAlarmId(null);
-      KeepAwake.deactivate();
-      
-             // Handle recurring alarm logic
-       if (currentAlarmId !== null) {
-         const currentAlarm = alarmsRef.current.find(alarm => alarm.id === currentAlarmId);
-        
-        if (currentAlarm && currentAlarm.repeatDays.length > 0) {
-          // This is a recurring alarm - schedule the next occurrence
-          console.log('Scheduling next occurrence for recurring alarm:', currentAlarmId);
-          
-          // Calculate next occurrence based on repeat days
-          const nextAlarmTime = calculateNextAlarmTime(currentAlarm.time, currentAlarm.repeatDays);
-          
-          // Create new alarm ID for the next occurrence
-          const newAlarmId = nextAlarmId;
-          
-          try {
-            // Schedule the next occurrence
-            const result = await AlarmModule.scheduleAlarm({ 
-              alarmId: newAlarmId, 
-              triggerTime: nextAlarmTime.getTime() 
-            });
-            
-            if (result) {
-                                      // Update the alarm with new time and ID
-             const updatedAlarms = alarmsRef.current.map(alarm => 
-               alarm.id === currentAlarmId 
-                 ? { ...alarm, id: newAlarmId, time: nextAlarmTime }
-                 : alarm
-             );
-           
-           setAlarms(updatedAlarms);
-           alarmsRef.current = updatedAlarms; // Update ref
-              setNextAlarmId(prev => prev + 1);
-              
-              // Save to storage
-              await saveAlarmsToStorage(updatedAlarms);
-              
-              // Show next occurrence info
-              const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-              const nextDayName = dayNames[nextAlarmTime.getDay()];
-              showCustomAlert('Success!', `Alarm dismissed! Next alarm set for ${nextDayName} at ${nextAlarmTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
-            } else {
-              showCustomAlert('Success!', 'Alarm dismissed!', 'success');
-            }
-          } catch (error) {
-            console.error('Error scheduling next occurrence:', error);
-            showCustomAlert('Success!', 'Alarm dismissed!', 'success');
-          }
-        } else {
-          // Non-recurring alarm - just dismiss
-          showCustomAlert('Success!', 'Alarm dismissed!', 'success');
-        }
-      } else {
-        showCustomAlert('Success!', 'Alarm dismissed!', 'success');
-      }
-    } else {
-      showCustomAlert('Wrong Answer!', 'Try again!', 'error');
-      setUserAnswer('');
-    }
-  };
-
-  const startAlarm = () => {
-    setIsAlarmActive(true);
-    setMathProblem(generateMathProblem());
-  };
-
-  const showCustomAlert = (title: string, message: string, type: 'success' | 'error' = 'success') => {
-    setCustomAlert({
-      visible: true,
-      title,
-      message,
-      type
-    });
-  };
-
-  const hideCustomAlert = () => {
-    setCustomAlert(prev => ({ ...prev, visible: false }));
-  };
-
-  const openSettings = () => {
-    if (Platform.OS === 'android') {
-      Linking.openSettings();
-    }
-  };
-
-  if (isAlarmActive && mathProblem) {
-    return (
-      <SafeAreaView style={styles.alarmContainer}>
-        <View style={styles.alarmContent}>
-          <Text style={styles.alarmTitle}>WAKE UP!</Text>
-          <Text style={styles.alarmSubtitle}>Solve this to stop the alarm!</Text>
-          <Text style={styles.mathProblem}>
-            {mathProblem.num1} {mathProblem.operator} {mathProblem.num2} = ?
-          </Text>
-          <TextInput
-            style={styles.answerInput}
-            value={userAnswer}
-            onChangeText={setUserAnswer}
-            keyboardType="numeric"
-            autoFocus={true}
-            onSubmitEditing={checkMathAnswer}
-          />
-          <TouchableOpacity style={styles.submitButton} onPress={checkMathAnswer}>
-            <Text style={styles.submitButtonText}>Submit Answer</Text>
-          </TouchableOpacity>
-          <Text style={styles.warningText}>You cannot exit until you solve this!</Text>
-        </View>
-      </SafeAreaView>
+  const handleRepeatDayToggle = (day: number) => {
+    setRepeatDays(prev => 
+      prev.includes(day) 
+        ? prev.filter(d => d !== day)
+        : [...prev, day]
     );
-  }
+  };
 
-  // Permission prompt modal
-  if (showPermissionPrompt) {
-  return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.permissionPromptContainer}>
-          <Text style={styles.permissionPromptTitle}>Permission Required</Text>
-          <Text style={styles.permissionPromptDescription}>
-            To wake you up with math challenges over your lock screen, Nooze needs permission to display over other apps.
-          </Text>
-          <TouchableOpacity 
-            style={styles.permissionPromptButton} 
-            onPress={() => {
-              openSettings();
-              setShowPermissionPrompt(false);
+  // Derive active wake-up time from stored alarms (if any)
+  const activeWakeUpTime = useMemo(() => {
+    const active = alarms.find(a => a.isActive);
+    if (active) return active.time;
+    // Fallback 1: use the most recently selectedTime (string like "6:00 AM")
+    if (selectedTime) {
+      const [timeStr, period] = selectedTime.split(' ');
+      const [h, m] = timeStr.split(':').map(Number);
+      let hour24 = h;
+      if (period === 'PM' && h !== 12) hour24 += 12;
+      if (period === 'AM' && h === 12) hour24 = 0;
+      const d = new Date();
+      d.setHours(hour24, m, 0, 0);
+      return d;
+    }
+    // Fallback 2: challenge's stored wake-up time (time-of-day)
+    if (currentChallenge?.wakeUpTime) {
+      return currentChallenge.wakeUpTime;
+    }
+    return null;
+  }, [alarms, selectedTime, currentChallenge]);
+
+  // Derive progress from current challenge
+  const totalDaysCount = useMemo(() => {
+    return currentChallenge?.duration === '90' ? 90 : 365;
+  }, [currentChallenge]);
+
+  const completedDaysCount = useMemo(() => {
+    if (!currentChallenge || !currentChallenge.isActive) return 0;
+    return Math.min(completedDaysFromLogs(), totalDaysCount);
+  }, [currentChallenge, totalDaysCount, completedDaysFromLogs]);
+
+  // Settings handlers
+  const openSettings = () => { setCurrentScreen('settings'); };
+  const openChallenges = () => { setCurrentScreen('challenges'); };
+  const openHome = () => { setCurrentScreen('home'); };
+
+  // Direct start flows from pre-challenge Home
+  const startThreeSixtyFiveFlow = () => {
+    setSelectedChallenge('365-day');
+    setCurrentScreen('nameInput');
+  };
+
+  // Render current screen
+  const renderCurrentScreen = () => {
+    switch (currentScreen) {
+      case 'home': 
+        return (
+          <HomeScreen 
+            wakeUpTime={activeWakeUpTime} 
+            selectedDuration={null} 
+            onOpenSettings={openSettings} 
+            onClearAllAlarms={handleClearAllAlarms} 
+            onOpenChallenges={openChallenges}
+            hasActiveChallenge={!!(currentChallenge && currentChallenge.isActive)}
+            onStartThreeSixtyFive={startThreeSixtyFiveFlow}
+            userName={userName}
+            currentDay={completedDaysCount}
+            dayStatusForDate={dayStatus}
+            actualWakeTime={null}
+            onEditTime={handleEditTime}
+            onSkipToday={handleSkipToday}
+            onTestAlarm={async () => {
+              try {
+                const now = new Date();
+                const trigger = new Date(now.getTime() + 60 * 1000);
+                await AlarmModule.scheduleOneOffTestAlarm({ triggerTime: trigger.getTime(), alarmId: 9999 });
+                Alert.alert('Scheduled', 'Test alarm set for ~1 minute from now');
+              } catch (e) {
+                Alert.alert('Error', 'Failed to schedule test alarm');
+              }
             }}
-          >
-            <Text style={styles.permissionPromptButtonText}>Allow</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.permissionPromptCancelButton} 
-            onPress={() => setShowPermissionPrompt(false)}
-          >
-            <Text style={styles.permissionPromptCancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // Home Screen
-  const renderHomeScreen = () => (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerTextContainer}>
-          <Text style={styles.headerTitle}>Nooze</Text>
-          <Text style={styles.headerSubtitle}>Wake up at exact time!</Text>
-        </View>
-      </View>
-
-      <View style={styles.alarmsSection}>
-        <Text style={styles.sectionTitle}>Active Alarms</Text>
-        
-        {alarms.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>No active alarms</Text>
-            <Text style={styles.emptyStateSubtext}>Tap + to set your first alarm</Text>
-          </View>
-        ) : (
-          alarms.map(alarm => (
-            <View key={alarm.id} style={styles.alarmItem}>
-              <View style={styles.alarmInfo}>
-                <Text style={styles.alarmTime}>
-                  {alarm.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </Text>
-                <Text style={styles.alarmDate}>
-                  {alarm.repeatDays.length > 0 
-                    ? alarm.repeatDays.map(day => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day]).join(', ')
-                    : alarm.time.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
-                  }
-                </Text>
-              </View>
-              <TouchableOpacity 
-                style={styles.cancelButton} 
-                onPress={() => cancelAlarm(alarm.id)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          ))
-        )}
-      </View>
-
-      {/* Floating Action Button */}
-      <TouchableOpacity 
-        style={styles.fab} 
-        onPress={() => setCurrentScreen('setAlarm')}
-      >
-        <Text style={styles.fabText}>+</Text>
-      </TouchableOpacity>
-    </SafeAreaView>
-  );
-
-  // Set Alarm Screen
-  const renderSetAlarmScreen = () => (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton} 
-          onPress={() => setCurrentScreen('home')}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
-        <View style={styles.headerTextContainer}>
-          <Text style={styles.headerTitle}>Nooze</Text>
-          <Text style={styles.headerSubtitle}>Wake up at exact time</Text>
-        </View>
-      </View>
-
-      <View style={styles.setAlarmContent}>
-        <Text style={styles.setAlarmTitle}>Choose Alarm Time</Text>
-        
-        <TouchableOpacity style={styles.timeInput} onPress={() => setShowTimePicker(true)}>
-          <View style={styles.timeInputContent}>
-            <Text style={styles.timeInputLabel}>Set Time</Text>
-            <Text style={styles.timeInputText}>
-              {selectedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </Text>
-            <Text style={styles.timeInputHint}>Tap to change</Text>
-          </View>
-        </TouchableOpacity>
-        
-        {showTimePicker && (
-          <DateTimePicker
-            value={selectedTime}
-            mode="time"
-            is24Hour={false}
-            display="spinner"
-            onChange={(event, date) => {
-              setShowTimePicker(Platform.OS === 'ios');
-              if (date) {
-                setSelectedTime(date);
+            completedDaysCount={completedDaysCount}
+            totalDaysCount={totalDaysCount}
+          />
+        );
+      case 'challenges':
+        return (
+          <ChallengesScreen
+            onBackToHome={openHome}
+            onSelectChallenge={handleChallengeSelect}
+            isActive={!!(currentChallenge && currentChallenge.isActive)}
+            currentChallengeTitle={currentChallenge?.duration === '365' ? '365‑Day Challenge' : '90‑Day Challenge'}
+          />
+        );
+      case 'settings': 
+        return (
+          <SettingsScreen 
+            onClearAllAlarms={handleClearAllAlarms} 
+            onBack={() => setCurrentScreen('home')} 
+            onTestAlarm={async () => {
+              try {
+                const now = new Date();
+                const trigger = new Date(now.getTime() + 60 * 1000);
+                await AlarmModule.scheduleOneOffTestAlarm({ triggerTime: trigger.getTime(), alarmId: 9999 });
+                Alert.alert('Scheduled', 'Test alarm set for ~1 minute from now');
+              } catch (e) {
+                Alert.alert('Error', 'Failed to schedule test alarm');
               }
             }}
           />
-        )}
-        
-        <Text style={styles.repeatTitle}>Repeat on</Text>
-        <View style={styles.repeatDaysContainer}>
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
-            <TouchableOpacity
-              key={index}
-              style={[
-                styles.repeatDayButton,
-                selectedRepeatDays.includes(index) && styles.repeatDayButtonSelected
-              ]}
-              onPress={() => {
-                if (selectedRepeatDays.includes(index)) {
-                  setSelectedRepeatDays(prev => prev.filter(d => d !== index));
-                } else {
-                  setSelectedRepeatDays(prev => [...prev, index]);
-                }
-              }}
-            >
-              <Text style={[
-                styles.repeatDayText,
-                selectedRepeatDays.includes(index) && styles.repeatDayTextSelected
-              ]}>
-                {day}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        
-        <TouchableOpacity 
-          style={styles.setAlarmButton} 
-          onPress={() => scheduleAlarm(selectedTime)}
-        >
-          <Text style={styles.setAlarmButtonText}>Set Alarm</Text>
-        </TouchableOpacity>
-    </View>
-    </SafeAreaView>
-  );
+        );
+      case 'nameInput':
+        return (
+          <NameInputScreen
+            challengeType={selectedChallenge}
+            onBack={goBack}
+            onNext={async (n: string) => { handleNameSubmit(n); await promptCriticalAccess(); }}
+          />
+        );
+      case 'timeSelection':
+        return (
+          <TimeSelectionScreen
+            userName={userName}
+            selectedChallenge={selectedChallenge}
+            onBack={goBack}
+            onTimeSelected={handleTimeSelected}
+            showBack={!isEditingTime}
+          />
+        );
+      case 'confirmation':
+        return (
+          <ConfirmationScreen
+            userName={userName}
+            selectedChallenge={selectedChallenge}
+            selectedTime={selectedTime}
+            onBack={goBack}
+            onConfirm={handleConfirm}
+          />
+        );
+      default: 
+        return (
+          <OnboardingScreen 
+            currentScreen={currentScreen} 
+            userName={userName}
+            selectedChallenge={selectedChallenge}
+            selectedMotivation={selectedMotivation} 
+            selectedMorningActivity={selectedMorningActivity} 
+            selectedPastExperience={selectedPastExperience} 
+            selectedObstacle={selectedObstacle} 
+            selectedRoutineRating={selectedRoutineRating} 
+            onOptionSelect={handleOptionSelect} 
+            onNext={handleNext} 
+            onBack={goBack} 
+            onStartChallenge={handleStartChallenge} 
+          />
+        );
+    }
+  };
 
-  // Custom Alert Component
-  const renderCustomAlert = () => (
-    <Modal
-      visible={customAlert.visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={hideCustomAlert}
-    >
-      <View style={styles.alertOverlay}>
-        <View style={styles.alertContainer}>
-          <View style={[
-            styles.alertHeader,
-            { backgroundColor: customAlert.type === 'success' ? '#F9F9F9' : '#FFB347' }
-          ]}>
-            <Text style={[
-              styles.alertTitle,
-              { fontWeight: customAlert.type === 'success' ? 'bold' : 'normal' }
-            ]}>{customAlert.title}</Text>
-          </View>
-          <View style={styles.alertBody}>
-            <Text style={[
-              styles.alertMessage,
-              { fontWeight: customAlert.type === 'success' ? 'bold' : 'normal' }
-            ]}>{customAlert.message}</Text>
-          </View>
-          <TouchableOpacity 
-            style={[
-              styles.alertButton,
-              { backgroundColor: '#A7C7E7' } // Always Soft Blue
-            ]}
-            onPress={hideCustomAlert}
-          >
-            <Text style={styles.alertButtonText}>OK</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  // Main render
-  if (currentScreen === 'setAlarm') {
-    return (
-      <>
-        {renderSetAlarmScreen()}
-        {renderCustomAlert()}
-      </>
-    );
-  }
-
-  return (
-    <>
-      {renderHomeScreen()}
-      {renderCustomAlert()}
-    </>
-  );
+  return renderCurrentScreen();
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9F9F9', // Off-White background for serenity
-  },
-  header: {
-    backgroundColor: '#F9F9F9', // Off-White background
-    padding: normalize(20),
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8E8E8', // Subtle border
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  title: {
-    fontSize: normalize(32),
-    fontWeight: 'bold',
-    color: '#3C3C3C', // Slate Gray for clarity
-  },
-  subtitle: {
-    fontSize: normalize(16),
-    color: '#666666',
-    marginTop: normalize(5),
-  },
-  fab: {
-    position: 'absolute',
-    bottom: normalize(120),
-    alignSelf: 'center',
-    backgroundColor: '#FFB347', // Sunrise Orange for energy and call-to-action
-    width: normalize(64),
-    height: normalize(64),
-    borderRadius: normalize(32),
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 12,
-    shadowColor: '#FFB347',
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-  },
-  fabText: {
-    color: 'white',
-    fontSize: normalize(32),
-    fontWeight: 'bold',
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: normalize(60),
-    paddingHorizontal: normalize(20),
-  },
-  emptyStateText: {
-    fontSize: normalize(20),
-    color: '#3C3C3C', // Slate Gray for clarity
-    marginBottom: normalize(12),
-    fontWeight: '600',
-  },
-  emptyStateSubtext: {
-    fontSize: normalize(16),
-    color: '#666666',
-    textAlign: 'center',
-    lineHeight: normalize(24),
-  },
-  alarmInfo: {
-    flex: 1,
-  },
-  alarmDate: {
-    fontSize: normalize(14),
-    color: '#666666',
-    marginTop: normalize(4),
-    fontWeight: '500',
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  backButton: {
-    padding: normalize(10),
-    position: 'absolute',
-    left: normalize(20),
-    zIndex: 1,
-  },
-  backButtonText: {
-    color: 'black',
-    fontSize: normalize(24),
-    fontWeight: 'bold',
-  },
-  headerTitle: {
-    color: '#3C3C3C', // Slate Gray for clarity
-    fontSize: normalize(64),
-    fontWeight: '900',
-    textAlign: 'center',
-    letterSpacing: -1,
-  },
-  headerTextContainer: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  headerSubtitle: {
-    color: '#666666',
-    fontSize: normalize(18),
-    marginTop: normalize(4),
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  setAlarmContent: {
-    flex: 1,
-    padding: normalize(20),
-    justifyContent: 'flex-start',
-    paddingTop: normalize(40),
-  },
-  setAlarmTitle: {
-    fontSize: normalize(32),
-    fontWeight: 'bold',
-    color: '#3C3C3C', // Slate Gray for clarity
-    textAlign: 'left',
-    marginBottom: normalize(24),
-    letterSpacing: -0.5,
-  },
-  sectionTitle: {
-    fontSize: normalize(20),
-    fontWeight: 'bold',
-    marginBottom: normalize(20),
-    color: '#3C3C3C', // Slate Gray for clarity
-  },
-  timeInput: {
-    borderWidth: 2,
-    borderColor: '#A7C7E7', // Soft Blue border
-    borderRadius: 16,
-    padding: normalize(24),
-    marginBottom: normalize(30),
-    backgroundColor: '#FFFFFF',
-    elevation: 4,
-    shadowColor: '#A7C7E7',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  timeInputContent: {
-    alignItems: 'center',
-  },
-  timeInputLabel: {
-    fontSize: normalize(14),
-    color: '#666666',
-    fontWeight: '600',
-    marginBottom: normalize(8),
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  timeInputText: {
-    fontSize: normalize(32),
-    textAlign: 'center',
-    color: '#3C3C3C', // Slate Gray
-    fontWeight: 'bold',
-    marginBottom: normalize(8),
-  },
-  timeInputHint: {
-    fontSize: normalize(12),
-    color: '#A7C7E7', // Soft Blue
-    fontWeight: '500',
-    fontStyle: 'italic',
-  },
-
-  setAlarmButton: {
-    backgroundColor: '#FFB347', // Sunrise Orange for energy and call-to-action
-    padding: normalize(18),
-    borderRadius: 16,
-    alignItems: 'center',
-    marginTop: normalize(40),
-    elevation: 8,
-    shadowColor: '#FFB347',
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-  },
-  setAlarmButtonText: {
-    color: '#FFFFFF',
-    fontSize: normalize(18),
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
-  },
-  alarmsSection: {
-    padding: normalize(24),
-    backgroundColor: '#C6E7C1', // Sage Green for growth and balance
-    margin: normalize(16),
-    borderRadius: 16,
-    elevation: 6,
-    shadowColor: '#C6E7C1',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    borderWidth: 0,
-  },
-  noAlarmsText: {
-    textAlign: 'center',
-    color: '#666',
-    fontStyle: 'italic',
-  },
-  alarmItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: normalize(18),
-    paddingHorizontal: normalize(16),
-    marginBottom: normalize(12),
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  alarmTime: {
-    fontSize: normalize(20),
-    color: '#3C3C3C', // Slate Gray for clarity
-    fontWeight: 'bold',
-  },
-  cancelButton: {
-    backgroundColor: '#A7C7E7', // Soft Blue for calm and trust
-    paddingHorizontal: normalize(20),
-    paddingVertical: normalize(10),
-    borderRadius: 8,
-    borderWidth: 0,
-    elevation: 2,
-    shadowColor: '#A7C7E7',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  cancelButtonText: {
-    color: '#3C3C3C', // Slate Gray for readability
-    fontSize: normalize(14),
-    fontWeight: '600',
-  },
-
-  alarmContainer: {
-    flex: 1,
-    backgroundColor: '#d32f2f',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  alarmContent: {
-    alignItems: 'center',
-    padding: normalize(20),
-  },
-  alarmTitle: {
-    fontSize: normalize(48),
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: normalize(10),
-  },
-  alarmSubtitle: {
-    fontSize: normalize(18),
-    color: 'white',
-    marginBottom: normalize(40),
-    textAlign: 'center',
-  },
-  mathProblem: {
-    fontSize: normalize(36),
-    color: 'white',
-    marginBottom: normalize(30),
-    fontWeight: 'bold',
-  },
-  answerInput: {
-    backgroundColor: 'white',
-    padding: normalize(15),
-    borderRadius: 8,
-    fontSize: normalize(24),
-    width: normalize(200),
-    textAlign: 'center',
-    marginBottom: normalize(20),
-    color: 'black',
-  },
-  submitButton: {
-    backgroundColor: '#4CAF50',
-    padding: normalize(15),
-    borderRadius: 8,
-    minWidth: normalize(150),
-    alignItems: 'center',
-  },
-  submitButtonText: {
-    color: 'white',
-    fontSize: normalize(18),
-    fontWeight: 'bold',
-  },
-  warningText: {
-    color: 'white',
-    fontSize: normalize(14),
-    textAlign: 'center',
-    marginTop: normalize(20),
-    fontStyle: 'italic',
-  },
-  permissionPromptContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: normalize(20),
-    backgroundColor: '#f5f5f5',
-  },
-  permissionPromptTitle: {
-    fontSize: normalize(24),
-    fontWeight: 'bold',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: normalize(20),
-  },
-  permissionPromptDescription: {
-    fontSize: normalize(16),
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: normalize(24),
-    marginBottom: normalize(30),
-    paddingHorizontal: normalize(20),
-  },
-  permissionPromptButton: {
-    backgroundColor: '#2196F3',
-    paddingHorizontal: normalize(30),
-    paddingVertical: normalize(15),
-    borderRadius: 8,
-    marginBottom: normalize(15),
-    minWidth: normalize(120),
-    alignItems: 'center',
-  },
-  permissionPromptButtonText: {
-    color: 'white',
-    fontSize: normalize(16),
-    fontWeight: 'bold',
-  },
-  permissionPromptCancelButton: {
-    paddingVertical: normalize(10),
-  },
-  permissionPromptCancelText: {
-    color: '#666',
-    fontSize: normalize(16),
-  },
-  repeatTitle: {
-    fontSize: normalize(24),
-    fontWeight: 'bold',
-    color: '#3C3C3C', // Slate Gray for clarity
-    marginTop: normalize(30),
-    marginBottom: normalize(20),
-    textAlign: 'left',
-  },
-  repeatDaysContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: normalize(30),
-    paddingHorizontal: normalize(16),
-  },
-  repeatDayButton: {
-    width: normalize(44),
-    height: normalize(44),
-    borderRadius: normalize(22),
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  repeatDayButtonSelected: {
-    backgroundColor: '#A7C7E7', // Soft Blue for selected state
-    borderColor: '#A7C7E7',
-    elevation: 2,
-    shadowColor: '#A7C7E7',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  repeatDayText: {
-    fontSize: normalize(13),
-    fontWeight: '600',
-    color: '#666666',
-  },
-  repeatDayTextSelected: {
-    color: '#FFFFFF', // White text on Soft Blue background
-    fontWeight: 'bold',
-  },
-  alertOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: normalize(20),
-  },
-  alertContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    width: '100%',
-    maxWidth: normalize(320),
-    elevation: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-  },
-  alertHeader: {
-    padding: normalize(20),
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    alignItems: 'center',
-  },
-  alertTitle: {
-    fontSize: normalize(20),
-    fontWeight: 'bold',
-    color: '#3C3C3C', // Slate Gray
-  },
-  alertBody: {
-    padding: normalize(20),
-    paddingTop: normalize(16),
-  },
-  alertMessage: {
-    fontSize: normalize(16),
-    color: '#666666',
-    textAlign: 'center',
-    lineHeight: normalize(24),
-  },
-  alertButton: {
-    padding: normalize(16),
-    margin: normalize(20),
-    marginTop: normalize(8),
-    borderRadius: 12,
-    alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  alertButtonText: {
-    color: '#3C3C3C', // Slate Gray for better contrast
-    fontSize: normalize(16),
-    fontWeight: 'bold',
-  },
-});
-
-export default App;
