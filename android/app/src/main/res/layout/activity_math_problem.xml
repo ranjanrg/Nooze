@@ -9,13 +9,14 @@
     android:background="@drawable/math_problem_bg_1">
 
     <TextView
+        android:id="@+id/step_header"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Solve Math to Stop Alarm"
-        android:textSize="24sp"
+        android:text="Sit up and place your feet on the floor."
+        android:textSize="28sp"
         android:textColor="#FFFFFF"
         android:textStyle="bold"
-        android:layout_marginBottom="32dp"
+        android:layout_marginBottom="24dp"
         android:gravity="center" />
 
     <TextView

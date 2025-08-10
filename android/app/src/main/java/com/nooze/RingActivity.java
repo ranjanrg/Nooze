@@ -8,6 +8,10 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
+import android.content.SharedPreferences;
+import org.json.JSONArray;
+import java.text.SimpleDateFormat;
+import java.util.Locale;
 
 public class RingActivity extends Activity {
     private static final String TAG = "RingActivity";
@@ -37,15 +41,16 @@ public class RingActivity extends Activity {
     private void setupUI() {
         TextView titleText = findViewById(R.id.alarm_title);
         Button dismissButton = findViewById(R.id.dismiss_button);
-        
-        // Always show "WAKE UP!" instead of alarm title
-        titleText.setText("WAKE UP!");
-        
-        // Dismiss button - stops alarm and shows math problem
-        dismissButton.setOnClickListener(new View.OnClickListener() {
+
+        // Fixed daily quote per your direction
+        titleText.setText("This moment can change your life");
+
+        // Dismiss button - long press to start (matches screenshot)
+        dismissButton.setOnLongClickListener(new View.OnLongClickListener() {
             @Override
-            public void onClick(View v) {
+            public boolean onLongClick(View v) {
                 dismissAlarm();
+                return true;
             }
         });
     }
@@ -66,5 +71,50 @@ public class RingActivity extends Activity {
     public void onBackPressed() {
         // Prevent back button from dismissing alarm
         // User must explicitly choose dismiss to solve math problem
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        try {
+            SharedPreferences prefs = getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
+            prefs.edit().putBoolean("ringActivityVisible", true).apply();
+            Log.d(TAG, "RingActivity visible=true");
+        } catch (Exception ignored) {}
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        try {
+            SharedPreferences prefs = getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
+            prefs.edit().putBoolean("ringActivityVisible", false).apply();
+            Log.d(TAG, "RingActivity visible=false");
+        } catch (Exception ignored) {}
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        try {
+            SharedPreferences prefs = getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
+            prefs.edit().putBoolean("ringActivityVisible", false).apply();
+        } catch (Exception ignored) {}
+    }
+
+    // Build a shuffled bag of indices 0..n-1 (Fisher–Yates)
+    private JSONArray buildShuffledBag(int n) {
+        int[] arr = new int[n];
+        for (int i = 0; i < n; i++) arr[i] = i;
+        java.util.Random rnd = new java.util.Random(System.currentTimeMillis());
+        for (int i = n - 1; i > 0; i--) {
+            int j = rnd.nextInt(i + 1);
+            int tmp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = tmp;
+        }
+        JSONArray bag = new JSONArray();
+        for (int v : arr) bag.put(v);
+        return bag;
     }
 } 

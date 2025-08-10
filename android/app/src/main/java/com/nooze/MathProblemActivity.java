@@ -17,6 +17,7 @@ public class MathProblemActivity extends Activity {
     private static final int TOTAL_QUESTIONS = 4;
     
     private TextView questionText;
+    private TextView stepHeader;
     private TextView progressText;
     private EditText answerInput;
     private Button submitButton;
@@ -48,6 +49,7 @@ public class MathProblemActivity extends Activity {
 
     private void initializeUI() {
         questionText = findViewById(R.id.question_text);
+        stepHeader = findViewById(R.id.step_header);
         progressText = findViewById(R.id.progress_text);
         answerInput = findViewById(R.id.answer_input);
         submitButton = findViewById(R.id.submit_button);
@@ -101,6 +103,17 @@ public class MathProblemActivity extends Activity {
         
         // Update progress
         progressText.setText("Question " + (questionIndex + 1) + " of " + TOTAL_QUESTIONS);
+
+        // Update step header per question
+        String[] steps = new String[]{
+            "Sit up and place your feet on the floor.",
+            "Stand up and walk to the bathroom.",
+            "Splash your face or brush your teeth.",
+            "Drink water and open the curtains."
+        };
+        if (questionIndex >= 0 && questionIndex < steps.length) {
+            stepHeader.setText(steps[questionIndex]);
+        }
         
         // Show question
         questionText.setText(questions[questionIndex]);

@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
@@ -27,6 +28,32 @@ public class AlarmService extends Service {
     private Vibrator vibrator;
     private boolean isVibrating = false;
     private AudioManager audioManager;
+    private android.os.Handler reassertHandler;
+    private android.os.Handler vibrationHandler;
+    private int vibrationPhase = 0; // 0: none, 1: 0-30s, 2: 30-60s, 3: 60s+
+    private final Runnable reassertRunnable = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                SharedPreferences prefs = getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
+                boolean visible = prefs.getBoolean("ringActivityVisible", false);
+                if (!visible) {
+                    // Re-post full screen notification to bring RingActivity to front
+                    Notification notification = createNotification("Alarm");
+                    NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                    nm.notify(NOTIFICATION_ID, notification);
+                    Log.d(TAG, "Reasserted full-screen notification (RingActivity not visible)");
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Reassert failed: " + e.getMessage());
+            } finally {
+                // Schedule next check in ~12 seconds
+                if (reassertHandler != null) {
+                    reassertHandler.postDelayed(this, 12000);
+                }
+            }
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -84,6 +111,10 @@ public class AlarmService extends Service {
         // Post full-screen notification which launches RingActivity over lock
         NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         notificationManager.notify(NOTIFICATION_ID, notification);
+
+        // Start periodic reassert while service is active
+        reassertHandler = new android.os.Handler(getMainLooper());
+        reassertHandler.postDelayed(reassertRunnable, 12000);
         
         return START_NOT_STICKY;
     }
@@ -162,37 +193,55 @@ public class AlarmService extends Service {
         if (vibrator != null && !isVibrating) {
             isVibrating = true;
 
-            // Stronger, longer pulses with short gaps; repeat indefinitely
-            long[] timings = new long[]{
-                0,   // delay
-                200, // vibrate
-                120, // pause
-                280, // vibrate
-                120, // pause
-                360, // vibrate
-                1000 // longer pause before repeating
-            };
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Use max amplitude on supported devices
-                int[] amplitudes = new int[]{
-                    0,   // delay
-                    255, // strong vibrate
-                    0,   // pause
-                    255, // strong vibrate
-                    0,   // pause
-                    255, // strong vibrate
-                    0    // pause
-                };
-                vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, 0));
-                Log.d(TAG, "Strong vibration started (Android O+)");
-            } else {
-                // Legacy: amplitude control not available; use longer pulses
-                vibrator.vibrate(timings, 0);
-                Log.d(TAG, "Strong vibration started (Legacy Android)");
+            // Initialize handler and escalate phases over time
+            if (vibrationHandler == null) {
+                vibrationHandler = new android.os.Handler(getMainLooper());
             }
+            applyVibrationPhase(1);
+            // Escalate after 30s and 60s
+            vibrationHandler.postDelayed(new Runnable() { @Override public void run() { applyVibrationPhase(2); } }, 30_000);
+            vibrationHandler.postDelayed(new Runnable() { @Override public void run() { applyVibrationPhase(3); } }, 60_000);
         } else {
             Log.d(TAG, "Vibration not started - vibrator null or already vibrating");
+        }
+    }
+
+    private void applyVibrationPhase(int phase) {
+        if (vibrator == null || !isVibrating) return;
+        if (phase < 1) phase = 1;
+        if (phase > 3) phase = 3;
+        vibrationPhase = phase;
+
+        long[] timings;
+        int[] amplitudes = null;
+        switch (phase) {
+            case 1: // moderate pulses
+                timings = new long[]{ 0, 200, 150, 200, 150, 260, 800 };
+                amplitudes = new int[]{ 0, 150, 0, 150, 0, 180, 0 };
+                break;
+            case 2: // stronger, shorter gaps
+                timings = new long[]{ 0, 280, 120, 280, 120, 320, 600 };
+                amplitudes = new int[]{ 0, 200, 0, 200, 0, 230, 0 };
+                break;
+            default: // phase 3 max intensity
+                timings = new long[]{ 0, 360, 100, 360, 100, 420, 500 };
+                amplitudes = new int[]{ 0, 255, 0, 255, 0, 255, 0 };
+                break;
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (vibrator.hasAmplitudeControl() && amplitudes != null) {
+                    vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, 0));
+                } else {
+                    vibrator.vibrate(VibrationEffect.createWaveform(timings, 0));
+                }
+            } else {
+                vibrator.vibrate(timings, 0);
+            }
+            Log.d(TAG, "Applied vibration phase: " + phase);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to apply vibration phase " + phase + ": " + e.getMessage());
         }
     }
 
@@ -209,10 +258,20 @@ public class AlarmService extends Service {
             vibrator.cancel();
             isVibrating = false;
         }
+        if (vibrationHandler != null) {
+            vibrationHandler.removeCallbacksAndMessages(null);
+            vibrationHandler = null;
+        }
         
         // Stop service
         stopForeground(true);
         stopSelf();
+
+        // Stop reassert loop
+        if (reassertHandler != null) {
+            reassertHandler.removeCallbacksAndMessages(null);
+            reassertHandler = null;
+        }
     }
 
     @Override
