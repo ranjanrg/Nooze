@@ -6,8 +6,9 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Alert, PermissionsAndroid, Platform } from 'react-native';
+import { Alert, AppState, AppStateStatus, PermissionsAndroid, Platform, Text, TextInput } from 'react-native';
 import { NativeModules } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { HomeScreen } from './src/components/HomeScreen';
 import { OnboardingScreen } from './src/components/OnboardingScreen';
 import { SettingsScreen } from './src/components/SettingsScreen';
@@ -20,6 +21,23 @@ import { useChallenge } from './src/hooks/useChallenge';
 import { ScreenType, OnboardingData } from './src/types';
 
 const { AlarmModule } = NativeModules;
+
+// Enforce Roboto as the default app font on Android so system font changes don't affect UI
+if (Platform.OS === 'android') {
+  const defaultFont = { fontFamily: 'Roboto' as const };
+  const applyDefaultFont = (Component: any) => {
+    // Preserve any existing default style and append our font
+    // so per-component styles can still override if needed
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const prev = Component.defaultProps?.style;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    Component.defaultProps = Component.defaultProps || {};
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    Component.defaultProps.style = prev ? [prev, defaultFont] : defaultFont;
+  };
+  applyDefaultFont(Text);
+  applyDefaultFont(TextInput);
+}
 
 export default function App() {
   // Screen navigation
@@ -37,14 +55,44 @@ export default function App() {
   const [userName, setUserName] = useState<string>('');
   const [isEditingTime, setIsEditingTime] = useState<boolean>(false);
   const { alarms, addAlarm, removeAlarm, clearAllAlarms } = useAlarms();
-  const { currentChallenge, startChallenge, calculateProgressPercentage, markDay, dayStatus, completedDaysFromLogs } = useChallenge();
+  const { currentChallenge, startChallenge, calculateProgressPercentage, markDay, dayStatus, completedDaysFromLogs, getLog, refreshLogs, logsVersion } = useChallenge();
 
   // Check permissions on app start
   useEffect(() => {
     // Ensure notification channel exists before requesting permissions
     try { AlarmModule.createAlarmChannel(); } catch {}
     checkPermissions();
+    // Load saved user name for header
+    (async () => {
+      try {
+        const saved = await AsyncStorage.getItem('userName');
+        if (saved) setUserName(saved);
+      } catch {}
+    })();
   }, []);
+
+  // Consume native completion on foreground and update logs
+  useEffect(() => {
+    const handleAppStateChange = async (state: AppStateStatus) => {
+      if (state === 'active') {
+        try {
+          const data = await AlarmModule.consumeLastCompletion?.();
+          if (data && typeof data === 'object') {
+            const { dateKey, actualWakeTime } = data as { dateKey?: string; actualWakeTime?: string };
+            const date = dateKey ? new Date(dateKey + 'T00:00:00') : new Date();
+            await markDay(date, 'completed', { actualWakeTime: actualWakeTime ? new Date(actualWakeTime) : new Date(), solvedMath: true });
+            try { await refreshLogs?.(); } catch {}
+          }
+        } catch (e) {
+          // no-op
+        }
+      }
+    };
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    // Run once on mount in case app is already active
+    handleAppStateChange('active');
+    return () => sub.remove();
+  }, [markDay]);
 
   const checkPermissions = async () => {
     if (Platform.OS === 'android') {
@@ -67,8 +115,8 @@ export default function App() {
           console.log('Notification permission denied');
           // Guide user to system settings when permission is denied or blocked
           Alert.alert(
-            'Allow notifications',
-            'To reliably show the alarm and math screen, enable notifications for Nooze in system settings.',
+            'Allow notifications (required)',
+            'This permission is necessary for alarms to ring and display over your lock screen. Without it, the alarm UI may not appear and you could miss alarms. Please enable notifications for Nooze.',
             [
               { text: 'Later', style: 'cancel' },
               { text: 'Open settings', onPress: async () => { try { await AlarmModule.openAppNotificationSettings(); } catch {} } },
@@ -81,8 +129,8 @@ export default function App() {
           const canExact = await AlarmModule.canScheduleExactAlarms();
           if (!canExact) {
             Alert.alert(
-              'Allow exact alarms',
-              'To ring at the exact minute, please allow exact alarms for Nooze.',
+              'Allow exact alarms (required)',
+              'This permission is necessary so your alarm fires at the exact minute every day, even in battery saver/Doze. Without it, Android may delay alarms.',
               [
                 { text: 'Not now', style: 'cancel' },
                 { text: 'Open settings', onPress: async () => { try { await AlarmModule.openExactAlarmSettings(); } catch {} } },
@@ -169,8 +217,9 @@ export default function App() {
     setCurrentScreen('nameInput');
   };
 
-  const handleNameSubmit = (name: string) => {
+  const handleNameSubmit = async (name: string) => {
     setUserName(name);
+    try { await AsyncStorage.setItem('userName', name); } catch {}
     // Go to the first onboarding question after name input
     setCurrentScreen('question');
   };
@@ -284,11 +333,11 @@ export default function App() {
     setCurrentScreen('timeSelection');
   };
 
-  // Skip today: adjust progress and optionally mark missed
-  const handleSkipToday = () => {
-    // Mark today as missed in logs; progress will reflect via completedDaysFromLogs
+  // Skip today: mark missed and refresh logs immediately for UI update
+  const handleSkipToday = async () => {
     try {
-      markDay(new Date(), 'missed');
+      await markDay(new Date(), 'missed');
+      try { await refreshLogs?.(); } catch {}
     } catch (e) {
       console.warn('Failed to mark day missed', e);
     }
@@ -400,7 +449,7 @@ export default function App() {
   const completedDaysCount = useMemo(() => {
     if (!currentChallenge || !currentChallenge.isActive) return 0;
     return Math.min(completedDaysFromLogs(), totalDaysCount);
-  }, [currentChallenge, totalDaysCount, completedDaysFromLogs]);
+  }, [currentChallenge, totalDaysCount, completedDaysFromLogs, logsVersion]);
 
   // Settings handlers
   const openSettings = () => { setCurrentScreen('settings'); };
@@ -429,19 +478,9 @@ export default function App() {
             userName={userName}
             currentDay={completedDaysCount}
             dayStatusForDate={dayStatus}
-            actualWakeTime={null}
+            actualWakeTime={(getLog(new Date())?.actualWakeTime ? new Date(getLog(new Date())!.actualWakeTime as any) : null)}
             onEditTime={handleEditTime}
             onSkipToday={handleSkipToday}
-            onTestAlarm={async () => {
-              try {
-                const now = new Date();
-                const trigger = new Date(now.getTime() + 60 * 1000);
-                await AlarmModule.scheduleOneOffTestAlarm({ triggerTime: trigger.getTime(), alarmId: 9999 });
-                Alert.alert('Scheduled', 'Test alarm set for ~1 minute from now');
-              } catch (e) {
-                Alert.alert('Error', 'Failed to schedule test alarm');
-              }
-            }}
             completedDaysCount={completedDaysCount}
             totalDaysCount={totalDaysCount}
           />
@@ -460,16 +499,6 @@ export default function App() {
           <SettingsScreen 
             onClearAllAlarms={handleClearAllAlarms} 
             onBack={() => setCurrentScreen('home')} 
-            onTestAlarm={async () => {
-              try {
-                const now = new Date();
-                const trigger = new Date(now.getTime() + 60 * 1000);
-                await AlarmModule.scheduleOneOffTestAlarm({ triggerTime: trigger.getTime(), alarmId: 9999 });
-                Alert.alert('Scheduled', 'Test alarm set for ~1 minute from now');
-              } catch (e) {
-                Alert.alert('Error', 'Failed to schedule test alarm');
-              }
-            }}
           />
         );
       case 'nameInput':

@@ -1,0 +1,7 @@
+[33mb1c743d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m  Complete UI/UX Overhaul - Professional Design & Enhanced Features
+[33mfe5bcdd[m Complete Nooze app implementation - System 2 with math problems and cleanup
+[33m345ed20[m Minor formatting changes
+[33m1bf1a4e[m Fix alarm restarting issue and improve floating widget functionality - Fixed alarm restarting after solving by improving flag clearing logic - Enhanced floating widget error handling with view attachment check - Fixed 'Open App' button to open math screen instead of home screen - Improved alarm sound service with immediate stop functionality - Added comprehensive logging for better debugging - All three alarm scenarios now working perfectly: solve in main screen, solve in floating widget, and open app button
+[33md693d9c[m v1.2: Complete math screen functionality with floating widget and persistent alarm sound
+[33m975b01c[m Version 1.1: Bug fixes and improvements - Fixed alarm timing accuracy, improved repeat functionality, added persistent storage, fixed text visibility, enhanced recurring alarms
+[33m3421f27[m Initial commit: Nooze alarm app with math challenges

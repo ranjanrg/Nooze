@@ -79,7 +79,9 @@ public class RescheduleAlarmsService extends Service {
                 android.content.Intent intent = new android.content.Intent(this, AlarmBroadcastReceiver.class);
                 int alarmId = prefs.getInt("lastAlarmId", 1001);
                 android.app.PendingIntent pendingIntent = android.app.PendingIntent.getBroadcast(this, alarmId, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    alarmManager.setAlarmClock(new android.app.AlarmManager.AlarmClockInfo(triggerTime, pendingIntent), pendingIntent);
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent);
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     alarmManager.setAlarmClock(new android.app.AlarmManager.AlarmClockInfo(triggerTime, pendingIntent), pendingIntent);

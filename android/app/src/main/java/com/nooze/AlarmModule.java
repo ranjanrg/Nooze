@@ -281,6 +281,32 @@ public class AlarmModule extends ReactContextBaseJavaModule {
         }
     }
 
+  @ReactMethod
+  public void consumeLastCompletion(Promise promise) {
+      try {
+          SharedPreferences prefs = reactContext.getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
+          boolean pending = prefs.getBoolean("lastCompletionPending", false);
+          if (!pending) {
+              promise.resolve(null);
+              return;
+          }
+          String dateKey = prefs.getString("lastCompletedDateKey", null);
+          String isoWake = prefs.getString("lastCompletedActualWakeTime", null);
+          // Clear the pending flag so it is consumed once
+          prefs.edit()
+                  .putBoolean("lastCompletionPending", false)
+                  .apply();
+          android.os.Bundle bundle = new android.os.Bundle();
+          bundle.putString("dateKey", dateKey);
+          bundle.putString("actualWakeTime", isoWake);
+          com.facebook.react.bridge.WritableMap map = com.facebook.react.bridge.Arguments.fromBundle(bundle);
+          promise.resolve(map);
+      } catch (Exception e) {
+          Log.e(TAG, "Error consuming last completion: " + e.getMessage());
+          promise.resolve(null);
+      }
+  }
+
     @ReactMethod
     public void saveAlarmsForBoot(String alarmsJson, Promise promise) {
         try {
@@ -330,23 +356,28 @@ public class AlarmModule extends ReactContextBaseJavaModule {
             );
             
             // Choose the best alarm scheduling method based on Android version and requirements
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                // Android 6.0+ (API 23+): Use setExactAndAllowWhileIdle for better Doze compatibility
-                // This is the recommended approach for critical alarms that need to fire even in Doze mode
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Android 12/31+: Use setAlarmClock to guarantee exact timing without special access
+                alarmManager.setAlarmClock(
+                    new AlarmManager.AlarmClockInfo(triggerTime, pendingIntent),
+                    pendingIntent
+                );
+                Log.d(TAG, "Scheduled alarm using setAlarmClock (Android 12+)");
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // Android 6.0+ (API 23–30): Exact while idle
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     triggerTime,
                     pendingIntent
                 );
-                Log.d(TAG, "Scheduled alarm using setExactAndAllowWhileIdle (Android 6.0+)");
+                Log.d(TAG, "Scheduled alarm using setExactAndAllowWhileIdle (Android 6.0–11)");
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                // Android 5.0+ (API 21+): Use setAlarmClock for critical wake-up alarms
-                // This provides the most reliable timing but uses more resources
+                // Android 5.0–5.1: AlarmClock
                 alarmManager.setAlarmClock(
                     new AlarmManager.AlarmClockInfo(triggerTime, pendingIntent),
                     pendingIntent
                 );
-                Log.d(TAG, "Scheduled alarm using setAlarmClock (Android 5.0+)");
+                Log.d(TAG, "Scheduled alarm using setAlarmClock (Android 5.x)");
             } else {
                 // Fallback for older Android versions
                 alarmManager.setExact(
@@ -422,7 +453,12 @@ public class AlarmModule extends ReactContextBaseJavaModule {
                 flags
             );
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                alarmManager.setAlarmClock(
+                    new AlarmManager.AlarmClockInfo(triggerTime, pendingIntent),
+                    pendingIntent
+                );
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     triggerTime,

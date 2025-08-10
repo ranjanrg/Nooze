@@ -66,13 +66,22 @@
         android:finishOnTaskLaunch="false">
       </activity>
       
-      <!-- Alarm Receiver -->
+      <!-- Alarm trigger receiver (no BOOT_COMPLETED here on Android 15+) -->
       <receiver
         android:name=".AlarmBroadcastReceiver"
         android:enabled="true"
         android:exported="false">
         <intent-filter>
           <action android:name="com.nooze.ALARM_TRIGGER" />
+        </intent-filter>
+      </receiver>
+
+      <!-- Separate boot receiver to avoid linking BOOT_COMPLETED to media playback FGS -->
+      <receiver
+        android:name=".BootCompletedReceiver"
+        android:enabled="true"
+        android:exported="false">
+        <intent-filter>
           <action android:name="android.intent.action.BOOT_COMPLETED" />
         </intent-filter>
       </receiver>

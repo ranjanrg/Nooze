@@ -161,17 +161,35 @@ public class AlarmService extends Service {
         Log.d(TAG, "startVibration called, vibrator: " + (vibrator != null) + ", isVibrating: " + isVibrating);
         if (vibrator != null && !isVibrating) {
             isVibrating = true;
-            
+
+            // Stronger, longer pulses with short gaps; repeat indefinitely
+            long[] timings = new long[]{
+                0,   // delay
+                200, // vibrate
+                120, // pause
+                280, // vibrate
+                120, // pause
+                360, // vibrate
+                1000 // longer pause before repeating
+            };
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Gentler vibration pattern: shorter pulses, longer pauses
-                vibrator.vibrate(VibrationEffect.createWaveform(
-                    new long[]{0, 50, 200, 50, 200, 50, 1500}, // Pattern: wait, vibrate, wait, vibrate, wait, vibrate, longer pause
-                    0 // Repeat indefinitely
-                ));
-                Log.d(TAG, "Gentle vibration started (Android O+)");
+                // Use max amplitude on supported devices
+                int[] amplitudes = new int[]{
+                    0,   // delay
+                    255, // strong vibrate
+                    0,   // pause
+                    255, // strong vibrate
+                    0,   // pause
+                    255, // strong vibrate
+                    0    // pause
+                };
+                vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, 0));
+                Log.d(TAG, "Strong vibration started (Android O+)");
             } else {
-                vibrator.vibrate(new long[]{0, 50, 200, 50, 200, 50, 1500}, 0);
-                Log.d(TAG, "Gentle vibration started (Legacy Android)");
+                // Legacy: amplitude control not available; use longer pulses
+                vibrator.vibrate(timings, 0);
+                Log.d(TAG, "Strong vibration started (Legacy Android)");
             }
         } else {
             Log.d(TAG, "Vibration not started - vibrator null or already vibrating");

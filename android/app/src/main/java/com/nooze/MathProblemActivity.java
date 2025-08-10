@@ -180,6 +180,24 @@ public class MathProblemActivity extends Activity {
             // Stop any remaining alarm service
             AlarmService.stopAlarm(this);
 
+            // Record completion so JS can update challenge logs on resume
+            try {
+                java.util.Date now = new java.util.Date();
+                java.text.SimpleDateFormat isoFmt = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", java.util.Locale.US);
+                java.text.SimpleDateFormat dayKeyFmt = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
+                String isoNow = isoFmt.format(now);
+                String dayKey = dayKeyFmt.format(now);
+                android.content.SharedPreferences prefs = getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
+                prefs.edit()
+                        .putString("lastCompletedActualWakeTime", isoNow)
+                        .putString("lastCompletedDateKey", dayKey)
+                        .putBoolean("lastCompletionPending", true)
+                        .apply();
+                Log.d(TAG, "Persisted completion event: dateKey=" + dayKey + ", actualWakeTime=" + isoNow);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to persist completion event: " + e.getMessage());
+            }
+
             // Schedule next day's alarm immediately using stored hour/minute
             try {
                 android.content.SharedPreferences prefs = getSharedPreferences("NoozePrefs", Context.MODE_PRIVATE);
@@ -199,7 +217,9 @@ public class MathProblemActivity extends Activity {
                     android.content.Intent intent = new android.content.Intent(this, AlarmBroadcastReceiver.class);
                     int alarmId = prefs.getInt("lastAlarmId", 1001);
                     android.app.PendingIntent pi = android.app.PendingIntent.getBroadcast(this, alarmId, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        am.setAlarmClock(new android.app.AlarmManager.AlarmClockInfo(triggerTime, pi), pi);
+                    } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
                         am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerTime, pi);
                     } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
                         am.setAlarmClock(new android.app.AlarmManager.AlarmClockInfo(triggerTime, pi), pi);

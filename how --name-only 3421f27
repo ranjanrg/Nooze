@@ -1,0 +1,13 @@
+[33mcommit 1bf1a4ef2e65325847365868ed579033e4d9d8c0[m
+Author: Ranjan <ranjanrg.dev@gmail.com>
+Date:   Sun Aug 3 15:57:00 2025 +0530
+
+    Fix alarm restarting issue and improve floating widget functionality - Fixed alarm restarting after solving by improving flag clearing logic - Enhanced floating widget error handling with view attachment check - Fixed 'Open App' button to open math screen instead of home screen - Improved alarm sound service with immediate stop functionality - Added comprehensive logging for better debugging - All three alarm scenarios now working perfectly: solve in main screen, solve in floating widget, and open app button
+
+App.tsx
+android/app/src/main/java/com/nooze/AlarmActivity.java
+android/app/src/main/java/com/nooze/AlarmModule.java
+android/app/src/main/java/com/nooze/AlarmReceiver.java
+android/app/src/main/java/com/nooze/AlarmSoundService.java
+android/app/src/main/java/com/nooze/FloatingMathWidget.java
+android/app/src/main/res/layout/floating_math_widget.xml
