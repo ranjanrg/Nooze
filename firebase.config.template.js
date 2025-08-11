@@ -1,18 +1,21 @@
-// Firebase configuration for Nooze
+// Firebase configuration template for Nooze
+// Copy this file to firebase.config.js and add your actual Firebase config values
+// Get these values from your Firebase project console
+
 import { initializeApp } from 'firebase/app';
 import { getAuth, initializeAuth, getReactNativePersistence } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// Your Firebase config (extracted from google-services.json)
+// Your Firebase config - REPLACE WITH YOUR ACTUAL VALUES
 const firebaseConfig = {
-  apiKey: "AIzaSyA3jIXcCepYGrEcPht8Z31IfKwt2wHy-1o",
-  authDomain: "nooze-app.firebaseapp.com",
-  projectId: "nooze-app",
-  storageBucket: "nooze-app.firebasestorage.app",
-  messagingSenderId: "412893832672",
-  appId: "1:412893832672:android:e93718504d56ade6a1b785"
+  apiKey: "YOUR_API_KEY_HERE",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.firebasestorage.app",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
 // Initialize Firebase
