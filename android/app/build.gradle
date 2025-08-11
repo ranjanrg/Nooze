@@ -2,6 +2,8 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
+// Add the Google services Gradle plugin
+apply plugin: "com.google.gms.google-services"
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -123,6 +125,14 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    
+    // Firebase BoM - manages all Firebase library versions
+    implementation platform("com.google.firebase:firebase-bom:34.1.0")
+    
+    // Firebase products (versions managed by BoM)
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
     
     // Room database
     def room_version = "2.6.1"

@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "412893832672",
+    "project_id": "nooze-app",
+    "storage_bucket": "nooze-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:412893832672:android:e93718504d56ade6a1b785",
+        "android_client_info": {
+          "package_name": "com.nooze"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "412893832672-vqrp9nk3bk9tjl0jec4841lrmdb82u47.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nooze",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "412893832672-p3qbmv5tm0e534b3vsei5611trp49ajs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA3jIXcCepYGrEcPht8Z31IfKwt2wHy-1o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "412893832672-p3qbmv5tm0e534b3vsei5611trp49ajs.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

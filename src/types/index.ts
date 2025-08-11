@@ -43,6 +43,7 @@ export type ScreenType =
   | 'settings' 
   | 'challenges' 
   | 'nameInput'
+  | 'auth'
   | 'timeSelection'
   | 'confirmation';
 

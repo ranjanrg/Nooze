@@ -1,0 +1,26 @@
+# Add these dependencies to your package.json
+
+# Firebase SDK
+"@react-native-firebase/app": "^18.6.1",
+"@react-native-firebase/auth": "^18.6.1",
+"@react-native-firebase/firestore": "^18.6.1",
+
+# Alternative: Firebase JS SDK (lighter, works with Expo)
+"firebase": "^10.7.1",
+
+# Google Sign-In
+"@react-native-google-signin/google-signin": "^10.1.0",
+
+# Apple Sign-In (iOS)
+"@react-native-apple-authentication/apple-authentication": "^2.2.2",
+
+# Network state detection
+"@react-native-community/netinfo": "^11.2.1",
+
+# Installation commands:
+# npm install @react-native-firebase/app @react-native-firebase/auth @react-native-firebase/firestore
+# npm install @react-native-google-signin/google-signin
+# npm install @react-native-apple-authentication/apple-authentication
+# npm install @react-native-community/netinfo
+
+# For iOS: cd ios && pod install

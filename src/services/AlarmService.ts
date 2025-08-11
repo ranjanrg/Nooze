@@ -4,6 +4,7 @@ import { Alarm } from '../types';
 class AlarmService {
   private static instance: AlarmService;
   private alarms: Alarm[] = [];
+  private cloudSyncService: any = null; // Lazy loaded to avoid circular dependency
 
   private constructor() {}
 
@@ -34,8 +35,25 @@ class AlarmService {
   async saveAlarms(): Promise<void> {
     try {
       await AsyncStorage.setItem('alarms', JSON.stringify(this.alarms));
+      
+      // Sync to cloud if user is authenticated
+      await this.syncToCloud();
     } catch (error) {
       console.error('Error saving alarms:', error);
+    }
+  }
+
+  private async syncToCloud(): Promise<void> {
+    try {
+      if (!this.cloudSyncService) {
+        const CloudSyncService = require('./CloudSyncService').default;
+        this.cloudSyncService = CloudSyncService.getInstance();
+      }
+      
+      await this.cloudSyncService.syncAlarms(this.alarms);
+    } catch (error) {
+      // Cloud sync is optional, don't block local operations
+      console.warn('Cloud sync failed:', error);
     }
   }
 

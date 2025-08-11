@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Alert, AppState, AppStateStatus, PermissionsAndroid, Platform, Text, TextInput } from 'react-native';
+import { Alert, AppState, AppStateStatus, PermissionsAndroid, Platform, Text, TextInput, View } from 'react-native';
 import { NativeModules } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { HomeScreen } from './src/components/HomeScreen';
@@ -18,7 +18,10 @@ import { TimeSelectionScreen } from './src/components/TimeSelectionScreen';
 import { ConfirmationScreen } from './src/components/ConfirmationScreen';
 import { useAlarms } from './src/hooks/useAlarms';
 import { useChallenge } from './src/hooks/useChallenge';
+import { useAuth } from './src/hooks/useAuth';
 import { ScreenType, OnboardingData } from './src/types';
+import { AuthScreen } from './src/components/AuthScreen';
+import { homeStyles } from './src/styles';
 
 const { AlarmModule } = NativeModules;
 
@@ -40,6 +43,10 @@ if (Platform.OS === 'android') {
 }
 
 export default function App() {
+  // Authentication
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const [showAuth, setShowAuth] = useState(false);
+  
   // Screen navigation
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('home');
   
@@ -161,7 +168,8 @@ export default function App() {
       pastExperience: 'morningActivities',
       obstacles: 'pastExperience',
       routineRating: 'obstacles',
-      timeSelection: 'routineRating',
+      auth: 'routineRating',
+      timeSelection: 'auth',
       confirmation: 'timeSelection',
       home: 'home',
       setAlarm: 'home',
@@ -178,7 +186,7 @@ export default function App() {
       morningActivities: 'pastExperience',
       pastExperience: 'obstacles',
       obstacles: 'routineRating',
-      routineRating: 'timeSelection',
+      routineRating: 'auth',
       timeSelection: 'confirmation',
       confirmation: 'home',
       home: 'home',
@@ -186,6 +194,7 @@ export default function App() {
       settings: 'home',
       challenges: 'home',
       nameInput: 'question',
+      auth: 'timeSelection',
     };
     setCurrentScreen(screenFlow[currentScreen]);
   };
@@ -220,8 +229,7 @@ export default function App() {
   const handleNameSubmit = async (name: string) => {
     setUserName(name);
     try { await AsyncStorage.setItem('userName', name); } catch {}
-    // Go to the first onboarding question after name input
-    setCurrentScreen('question');
+    // Screen navigation is handled by the caller
   };
 
   // Onboarding helper to prompt all critical permissions/special access
@@ -464,6 +472,7 @@ export default function App() {
 
   // Render current screen
   const renderCurrentScreen = () => {
+
     switch (currentScreen) {
       case 'home': 
         return (
@@ -498,7 +507,8 @@ export default function App() {
         return (
           <SettingsScreen 
             onClearAllAlarms={handleClearAllAlarms} 
-            onBack={() => setCurrentScreen('home')} 
+            onBack={() => setCurrentScreen('home')}
+            onShowAuth={() => setShowAuth(true)}
           />
         );
       case 'nameInput':
@@ -506,7 +516,35 @@ export default function App() {
           <NameInputScreen
             challengeType={selectedChallenge}
             onBack={goBack}
-            onNext={async (n: string) => { handleNameSubmit(n); await promptCriticalAccess(); }}
+            onNext={async (n: string) => { 
+              handleNameSubmit(n); 
+              // Continue to onboarding questions
+              setCurrentScreen('question');
+            }}
+          />
+        );
+      case 'auth':
+        // If already authenticated, skip to time selection
+        if (isAuthenticated && !authLoading) {
+          setCurrentScreen('timeSelection');
+          return null;
+        }
+        
+        // Show loading while auth is initializing
+        if (authLoading) {
+          return (
+            <View style={[homeStyles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+              <Text style={homeStyles.appTitle}>Nooze</Text>
+              <Text style={homeStyles.subtitle}>Syncing your data...</Text>
+            </View>
+          );
+        }
+        
+        return (
+          <AuthScreen 
+            onAuthSuccess={() => {
+              setCurrentScreen('timeSelection');
+            }} 
           />
         );
       case 'timeSelection':
@@ -514,7 +552,7 @@ export default function App() {
           <TimeSelectionScreen
             userName={userName}
             selectedChallenge={selectedChallenge}
-            onBack={goBack}
+            onBack={() => setCurrentScreen('auth')}
             onTimeSelected={handleTimeSelected}
             showBack={!isEditingTime}
           />

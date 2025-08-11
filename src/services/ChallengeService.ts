@@ -6,6 +6,7 @@ class ChallengeService {
   private currentChallenge: Challenge | null = null;
   private onboardingData: OnboardingData | null = null;
   private logsByDate: Record<string, ChallengeLogEntry> = {};
+  private cloudSyncService: any = null; // Lazy loaded to avoid circular dependency
 
   private constructor() {}
 
@@ -43,6 +44,7 @@ class ChallengeService {
     try {
       this.currentChallenge = challenge;
       await AsyncStorage.setItem('currentChallenge', JSON.stringify(challenge));
+      await this.syncToCloud();
     } catch (error) {
       console.error('Error saving challenge:', error);
     }
@@ -69,6 +71,55 @@ class ChallengeService {
 
   private async saveLogs(): Promise<void> {
     await AsyncStorage.setItem('challengeLogs', JSON.stringify(this.logsByDate));
+    await this.syncLogsToCloud();
+  }
+
+  async saveLogs(logs: Record<string, ChallengeLogEntry>): Promise<void> {
+    this.logsByDate = logs;
+    await this.saveLogs();
+  }
+
+  private async syncToCloud(): Promise<void> {
+    try {
+      if (!this.cloudSyncService) {
+        const CloudSyncService = require('./CloudSyncService').default;
+        this.cloudSyncService = CloudSyncService.getInstance();
+      }
+      
+      if (this.currentChallenge) {
+        await this.cloudSyncService.syncChallenge(this.currentChallenge);
+      }
+    } catch (error) {
+      console.warn('Cloud sync failed:', error);
+    }
+  }
+
+  private async syncLogsToCloud(): Promise<void> {
+    try {
+      if (!this.cloudSyncService) {
+        const CloudSyncService = require('./CloudSyncService').default;
+        this.cloudSyncService = CloudSyncService.getInstance();
+      }
+      
+      await this.cloudSyncService.syncChallengeLogs(this.logsByDate);
+    } catch (error) {
+      console.warn('Cloud sync failed:', error);
+    }
+  }
+
+  private async syncOnboardingToCloud(): Promise<void> {
+    try {
+      if (!this.cloudSyncService) {
+        const CloudSyncService = require('./CloudSyncService').default;
+        this.cloudSyncService = CloudSyncService.getInstance();
+      }
+      
+      if (this.onboardingData) {
+        await this.cloudSyncService.syncOnboardingData(this.onboardingData);
+      }
+    } catch (error) {
+      console.warn('Cloud sync failed:', error);
+    }
   }
 
   async markDay(date: Date, status: DayStatus, info?: { actualWakeTime?: Date; solvedMath?: boolean }): Promise<void> {
@@ -159,6 +210,7 @@ class ChallengeService {
     try {
       this.onboardingData = data;
       await AsyncStorage.setItem('onboardingData', JSON.stringify(data));
+      await this.syncOnboardingToCloud();
     } catch (error) {
       console.error('Error saving onboarding data:', error);
     }
