@@ -50,6 +50,12 @@ class AlarmService {
         this.cloudSyncService = CloudSyncService.getInstance();
       }
       
+      // Skip sync if we're already syncing from cloud (prevents circular calls)
+      if (this.cloudSyncService.isSyncingFromCloudNow()) {
+        console.log('AlarmService: Skipping sync to cloud (already syncing from cloud)');
+        return;
+      }
+      
       await this.cloudSyncService.syncAlarms(this.alarms);
     } catch (error) {
       // Cloud sync is optional, don't block local operations

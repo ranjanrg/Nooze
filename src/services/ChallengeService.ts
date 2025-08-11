@@ -69,14 +69,14 @@ class ChallengeService {
     }
   }
 
-  private async saveLogs(): Promise<void> {
+  private async saveLogsToStorage(): Promise<void> {
     await AsyncStorage.setItem('challengeLogs', JSON.stringify(this.logsByDate));
     await this.syncLogsToCloud();
   }
 
   async saveLogs(logs: Record<string, ChallengeLogEntry>): Promise<void> {
     this.logsByDate = logs;
-    await this.saveLogs();
+    await this.saveLogsToStorage();
   }
 
   private async syncToCloud(): Promise<void> {
@@ -84,6 +84,12 @@ class ChallengeService {
       if (!this.cloudSyncService) {
         const CloudSyncService = require('./CloudSyncService').default;
         this.cloudSyncService = CloudSyncService.getInstance();
+      }
+      
+      // Skip sync if we're already syncing from cloud (prevents circular calls)
+      if (this.cloudSyncService.isSyncingFromCloudNow()) {
+        console.log('ChallengeService: Skipping challenge sync to cloud (already syncing from cloud)');
+        return;
       }
       
       if (this.currentChallenge) {
@@ -101,6 +107,12 @@ class ChallengeService {
         this.cloudSyncService = CloudSyncService.getInstance();
       }
       
+      // Skip sync if we're already syncing from cloud (prevents circular calls)
+      if (this.cloudSyncService.isSyncingFromCloudNow()) {
+        console.log('ChallengeService: Skipping logs sync to cloud (already syncing from cloud)');
+        return;
+      }
+      
       await this.cloudSyncService.syncChallengeLogs(this.logsByDate);
     } catch (error) {
       console.warn('Cloud sync failed:', error);
@@ -112,6 +124,12 @@ class ChallengeService {
       if (!this.cloudSyncService) {
         const CloudSyncService = require('./CloudSyncService').default;
         this.cloudSyncService = CloudSyncService.getInstance();
+      }
+      
+      // Skip sync if we're already syncing from cloud (prevents circular calls)
+      if (this.cloudSyncService.isSyncingFromCloudNow()) {
+        console.log('ChallengeService: Skipping onboarding sync to cloud (already syncing from cloud)');
+        return;
       }
       
       if (this.onboardingData) {
@@ -130,7 +148,7 @@ class ChallengeService {
       actualWakeTime: info?.actualWakeTime ? info.actualWakeTime.toISOString() : undefined,
       solvedMath: info?.solvedMath,
     };
-    await this.saveLogs();
+    await this.saveLogsToStorage();
   }
 
   getDayStatus(date: Date): DayStatus | null {

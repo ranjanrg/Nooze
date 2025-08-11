@@ -49,17 +49,22 @@ export interface UserCloudData {
 class CloudSyncService {
   private static instance: CloudSyncService;
   private authService: AuthService;
-  private alarmService: AlarmService;
-  private challengeService: ChallengeService;
+  private alarmService: AlarmService | null = null;
+  private challengeService: ChallengeService | null = null;
   private isOnline: boolean = true;
   private pendingChanges: any[] = [];
+  private readonly MAX_PENDING_CHANGES = 100; // Limit to prevent memory issues
+  private readonly MAX_RETRY_ATTEMPTS = 3;
+  private readonly INITIAL_RETRY_DELAY = 1000; // 1 second
   private syncInProgress: boolean = false;
+  private isSyncingFromCloud: boolean = false;
+  private isInitializing: boolean = false;
   private realtimeListeners: (() => void)[] = [];
 
   private constructor() {
     this.authService = AuthService.getInstance();
-    this.alarmService = AlarmService.getInstance();
-    this.challengeService = ChallengeService.getInstance();
+    // Don't initialize other services here to avoid circular dependency
+    // They will be lazy-loaded when needed
     this.initializeNetworkListener();
   }
 
@@ -68,6 +73,45 @@ class CloudSyncService {
       CloudSyncService.instance = new CloudSyncService();
     }
     return CloudSyncService.instance;
+  }
+
+  // Check if we're currently syncing from cloud (to prevent circular calls)
+  public isSyncingFromCloudNow(): boolean {
+    return this.isSyncingFromCloud;
+  }
+
+  // Add to pending changes with memory management
+  private addToPendingChanges(change: any): void {
+    // Remove oldest changes if we exceed the limit
+    if (this.pendingChanges.length >= this.MAX_PENDING_CHANGES) {
+      const removeCount = Math.floor(this.MAX_PENDING_CHANGES * 0.2); // Remove 20% of oldest
+      this.pendingChanges.splice(0, removeCount);
+      console.warn(`CloudSync: Removed ${removeCount} oldest pending changes to prevent memory issues`);
+    }
+    
+    this.pendingChanges.push(change);
+  }
+
+  // Retry mechanism with exponential backoff
+  private async retryWithBackoff<T>(
+    operation: () => Promise<T>,
+    operationName: string,
+    attempt: number = 1
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt >= this.MAX_RETRY_ATTEMPTS) {
+        console.error(`CloudSync: ${operationName} failed after ${this.MAX_RETRY_ATTEMPTS} attempts:`, error);
+        throw error;
+      }
+
+      const delay = this.INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1); // Exponential backoff
+      console.warn(`CloudSync: ${operationName} failed (attempt ${attempt}), retrying in ${delay}ms...`, error.message);
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return this.retryWithBackoff(operation, operationName, attempt + 1);
+    }
   }
 
   private initializeNetworkListener() {
@@ -82,20 +126,45 @@ class CloudSyncService {
     });
   }
 
+  // Lazy load services to avoid circular dependency
+  private getAlarmService(): AlarmService {
+    if (!this.alarmService) {
+      this.alarmService = AlarmService.getInstance();
+    }
+    return this.alarmService;
+  }
+
+  private getChallengeService(): ChallengeService {
+    if (!this.challengeService) {
+      this.challengeService = ChallengeService.getInstance();
+    }
+    return this.challengeService;
+  }
+
   // Initialize cloud sync for authenticated user
   async initializeCloudSync(): Promise<void> {
+    // Prevent multiple simultaneous initializations
+    if (this.isInitializing) {
+      console.log('CloudSync: Initialization already in progress, skipping...');
+      return;
+    }
+
     const user = this.authService.getCurrentUser();
     if (!user) {
       console.error('CloudSync: No authenticated user found');
       throw new Error('User not authenticated');
     }
 
+    this.isInitializing = true;
     console.log('CloudSync: Initializing cloud sync for user:', user.uid);
     
     try {
       console.log('CloudSync: Checking if user document exists...');
-      // Check if user data exists in cloud
-      const userDoc = await this.getUserDocument(user.uid);
+      // Check if user data exists in cloud with retry mechanism
+      const userDoc = await this.retryWithBackoff(
+        () => this.getUserDocument(user.uid),
+        'getUserDocument'
+      );
       
       if (userDoc.exists()) {
         console.log('CloudSync: User document exists, syncing from cloud...');
@@ -116,6 +185,9 @@ class CloudSyncService {
       console.error('CloudSync: Failed to initialize cloud sync:', error);
       console.error('CloudSync: Error details:', JSON.stringify(error, null, 2));
       throw new Error(`Cloud sync initialization failed: ${error.message}`);
+    } finally {
+      // Always reset the initialization flag
+      this.isInitializing = false;
     }
   }
 
@@ -130,13 +202,13 @@ class CloudSyncService {
     try {
       console.log('CloudSync: Starting local data migration...');
       
-      // Load all local data
+      // Load all local data directly from AsyncStorage to avoid circular dependency during initialization
       console.log('CloudSync: Loading local data...');
       const [alarms, currentChallenge, challengeLogs, onboardingData, userName] = await Promise.all([
-        this.alarmService.loadAlarms(),
-        this.challengeService.getCurrentChallenge(),
-        this.challengeService.loadLogs(),
-        this.challengeService.getOnboardingData(),
+        this.loadAlarmsDirectly(),
+        this.loadChallengeDirectly(),
+        this.loadLogsDirectly(),
+        this.loadOnboardingDirectly(),
         this.getLocalUserName()
       ]);
 
@@ -199,9 +271,15 @@ class CloudSyncService {
     const user = this.authService.getCurrentUser();
     if (!user) return;
 
+    // Prevent infinite loops during cloud sync
+    this.isSyncingFromCloud = true;
+
     try {
       console.log('Syncing data from cloud...');
-      const userDoc = await this.getUserDocument(user.uid);
+      const userDoc = await this.retryWithBackoff(
+        () => this.getUserDocument(user.uid),
+        'syncFromCloud getUserDocument'
+      );
       
       if (!userDoc.exists()) {
         console.warn('User document does not exist in cloud');
@@ -213,9 +291,10 @@ class CloudSyncService {
       // Update local services with cloud data
       if (cloudData.alarms) {
         // Clear local alarms and replace with cloud data
-        await this.alarmService.clearAllAlarms();
+        const alarmService = this.getAlarmService();
+        await alarmService.clearAllAlarms();
         for (const alarm of cloudData.alarms) {
-          await this.alarmService.addAlarm({
+          await alarmService.addAlarm({
             time: alarm.time,
             repeatDays: alarm.repeatDays,
             isActive: alarm.isActive
@@ -224,18 +303,21 @@ class CloudSyncService {
       }
 
       if (cloudData.currentChallenge) {
-        await this.challengeService.saveChallenge(cloudData.currentChallenge);
+        const challengeService = this.getChallengeService();
+        await challengeService.saveChallenge(cloudData.currentChallenge);
       }
 
       if (cloudData.challengeLogs) {
         // Merge challenge logs (cloud takes precedence)
-        const localLogs = await this.challengeService.loadLogs();
+        const challengeService = this.getChallengeService();
+        const localLogs = await challengeService.loadLogs();
         const mergedLogs = { ...localLogs, ...cloudData.challengeLogs };
-        await this.challengeService.saveLogs(mergedLogs);
+        await challengeService.saveLogs(mergedLogs);
       }
 
       if (cloudData.onboardingData) {
-        await this.challengeService.saveOnboardingData(cloudData.onboardingData);
+        const challengeService = this.getChallengeService();
+        await challengeService.saveOnboardingData(cloudData.onboardingData);
       }
 
       if (cloudData.profile.userName) {
@@ -249,6 +331,9 @@ class CloudSyncService {
     } catch (error) {
       console.error('Failed to sync from cloud:', error);
       throw error;
+    } finally {
+      // Always reset the flag
+      this.isSyncingFromCloud = false;
     }
   }
 
@@ -295,8 +380,8 @@ class CloudSyncService {
     if (!user) return;
 
     if (!this.isOnline) {
-      // Queue changes for later sync
-      this.pendingChanges.push({ ...changes, timestamp: Date.now() });
+      // Queue changes for later sync with memory management
+      this.addToPendingChanges({ ...changes, timestamp: Date.now() });
       return;
     }
 
@@ -309,14 +394,17 @@ class CloudSyncService {
         'syncMetadata.version': Date.now() // Simple versioning
       };
 
-      await updateDoc(doc(db, 'users', user.uid), updateData);
+      await this.retryWithBackoff(
+        () => updateDoc(doc(db, 'users', user.uid), updateData),
+        'syncToCloud updateDoc'
+      );
       await this.updateDeviceInfo();
       
       console.log('Data synced to cloud successfully');
     } catch (error) {
       console.error('Failed to sync to cloud:', error);
-      // Add to pending changes if sync failed
-      this.pendingChanges.push({ ...changes, timestamp: Date.now() });
+      // Add to pending changes if sync failed with memory management
+      this.addToPendingChanges({ ...changes, timestamp: Date.now() });
     } finally {
       this.syncInProgress = false;
     }
@@ -379,6 +467,47 @@ class CloudSyncService {
     try {
       const AsyncStorage = require('@react-native-async-storage/async-storage').default;
       return await AsyncStorage.getItem('userName');
+    } catch {
+      return null;
+    }
+  }
+
+  // Direct loading methods to avoid circular dependency during initialization
+  private async loadAlarmsDirectly(): Promise<any[]> {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const alarmsJson = await AsyncStorage.getItem('alarms');
+      return alarmsJson ? JSON.parse(alarmsJson) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async loadChallengeDirectly(): Promise<any | null> {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const challengeJson = await AsyncStorage.getItem('currentChallenge');
+      return challengeJson ? JSON.parse(challengeJson) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async loadLogsDirectly(): Promise<Record<string, any>> {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const logsJson = await AsyncStorage.getItem('challengeLogs');
+      return logsJson ? JSON.parse(logsJson) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private async loadOnboardingDirectly(): Promise<any | null> {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const onboardingJson = await AsyncStorage.getItem('onboardingData');
+      return onboardingJson ? JSON.parse(onboardingJson) : null;
     } catch {
       return null;
     }

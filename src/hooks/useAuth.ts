@@ -50,7 +50,11 @@ export const useAuth = (): UseAuthReturn => {
       } else {
         // User signed out, cleanup cloud sync
         console.log('useAuth: User signed out, cleaning up cloud sync...');
-        cloudSyncService.cleanup();
+        try {
+          cloudSyncService.cleanup();
+        } catch (error) {
+          console.log('useAuth: Error cleaning up cloud sync:', error);
+        }
       }
     });
 
