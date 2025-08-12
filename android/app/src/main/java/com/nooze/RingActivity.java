@@ -45,12 +45,11 @@ public class RingActivity extends Activity {
         // Fixed daily quote per your direction
         titleText.setText("This moment can change your life");
 
-        // Dismiss button - long press to start (matches screenshot)
-        dismissButton.setOnLongClickListener(new View.OnLongClickListener() {
+        // Dismiss button - simple touch to start
+        dismissButton.setOnClickListener(new View.OnClickListener() {
             @Override
-            public boolean onLongClick(View v) {
+            public void onClick(View v) {
                 dismissAlarm();
-                return true;
             }
         });
     }

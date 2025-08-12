@@ -1,0 +1,10 @@
+[33m79c9384[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m feat: Complete authentication and cloud sync implementation
+[33m85f241a[m  SECURITY FIX: Remove exposed Firebase API keys
+[33ma4e30a4[m  Implement Firebase Cloud Sync & Authentication
+[33m1881b70[m build: bump Android versionCode to 10, versionName to 1.9; generate release AAB
+[33m7caec9a[m ui(ring,math): fixed Ring quote to 'This moment can change your life'; orange background; long-press CTA; math screen step headers with larger size; alarm UI vibe alignment
+[33m5fd62f6[m feat(alarms,ui): exact alarms on API 31+ via setAlarmClock; JS sync for math completion; Today card + Solved math wired; instant Skip updates; persist userName; greeting copy
+[33m6483af1[m Android: add POST_NOTIFICATIONS, align AlarmService to mediaPlayback, create channel before prompts, guide to settings on deny; fix full-screen ring launch reliability
+[33m6f4ecb1[m Fix app signing configuration - Add new upload keystore and update build settings
+[33mb1c743d[m  Complete UI/UX Overhaul - Professional Design & Enhanced Features
+[33mfe5bcdd[m Complete Nooze app implementation - System 2 with math problems and cleanup

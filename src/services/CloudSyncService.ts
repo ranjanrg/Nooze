@@ -167,9 +167,21 @@ class CloudSyncService {
       );
       
       if (userDoc.exists()) {
-        console.log('CloudSync: User document exists, syncing from cloud...');
-        // User exists, sync down from cloud
-        await this.syncFromCloud();
+        console.log('CloudSync: User document exists, checking local data...');
+        // Check if we have local data that might be newer
+        const challengeService = this.getChallengeService();
+        const localLogs = await challengeService.loadLogs();
+        const hasLocalData = Object.keys(localLogs).length > 0;
+        
+        if (hasLocalData) {
+          console.log('CloudSync: Local data found, uploading to cloud instead of downloading...');
+          // We have local data, so upload it instead of downloading
+          await this.migrateLocalDataToCloud();
+        } else {
+          console.log('CloudSync: No local data, syncing from cloud...');
+          // No local data, safe to sync from cloud
+          await this.syncFromCloud();
+        }
       } else {
         console.log('CloudSync: New user, migrating local data to cloud...');
         // New user, migrate local data to cloud
@@ -308,11 +320,13 @@ class CloudSyncService {
       }
 
       if (cloudData.challengeLogs) {
-        // Merge challenge logs (cloud takes precedence)
+        // Smart merge challenge logs (preserve both local and cloud data)
         const challengeService = this.getChallengeService();
         const localLogs = await challengeService.loadLogs();
-        const mergedLogs = { ...localLogs, ...cloudData.challengeLogs };
+        // Local data takes precedence over cloud data to prevent overwriting newer entries
+        const mergedLogs = { ...cloudData.challengeLogs, ...localLogs };
         await challengeService.saveLogs(mergedLogs);
+        console.log('CloudSync: Merged logs - Local entries:', Object.keys(localLogs).length, 'Cloud entries:', Object.keys(cloudData.challengeLogs).length, 'Final merged:', Object.keys(mergedLogs).length);
       }
 
       if (cloudData.onboardingData) {
